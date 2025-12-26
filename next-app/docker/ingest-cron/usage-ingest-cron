@@ -1,0 +1,2 @@
+# Deprecated. Use host cron/systemd + one-shot container: 
+# * * * * * cd /path/to/next-app && docker run --rm --env-file .env -v $(pwd)/.env:/app/.env:ro usage-ingest-image npm run usage:ingest

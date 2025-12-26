@@ -1,0 +1,23 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+ARG DATABASE_URL=postgresql://placeholder:placeholder@localhost:5432/placeholder
+ENV DATABASE_URL=${DATABASE_URL}
+
+# Install dependencies (dev deps needed for tsx/prisma generate)
+COPY package.json package-lock.json ./
+RUN npm install --no-audit --no-fund
+
+# Copy source needed for ingestion
+COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+COPY tsconfig.json ./tsconfig.json
+COPY lib ./lib
+COPY scripts ./scripts
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Default command runs one-shot ingestion (env is provided at runtime)
+CMD ["npm", "run", "usage:ingest"]

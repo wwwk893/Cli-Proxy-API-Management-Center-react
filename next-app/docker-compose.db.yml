@@ -1,0 +1,13 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cliproxy
+      POSTGRES_PASSWORD: cliproxy
+      POSTGRES_DB: cliproxy_mgmt
+    ports:
+      - "55432:5432"
+    volumes:
+      - ./_data/postgres:/var/lib/postgresql/data
