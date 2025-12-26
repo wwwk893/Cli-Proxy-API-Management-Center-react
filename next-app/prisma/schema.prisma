@@ -1,0 +1,103 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+model UsageEvent {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  eventTime       DateTime
+  apiPath         String
+  model           String
+  proxyHost       String?
+  status          String?
+  inputTokens     Int
+  outputTokens    Int
+  reasoningTokens Int
+  cachedTokens    Int
+  totalTokens     Int
+  costUsd         Decimal @db.Decimal(12, 6)
+  rawKey          String  @unique
+
+  sourceType      String?
+  sessionId       String?
+  cwd             String?
+  originator      String?
+  cliVersion      String?
+  effort          String?
+
+  authSource      String?
+  authIndex       Int?
+  authFailed      Boolean? @default(false)
+
+  @@index([authSource, createdAt])
+  @@index([sourceType, eventTime])
+  @@index([sessionId, eventTime])
+  @@index([cwd, eventTime])
+  @@index([eventTime, model])
+}
+
+model UsageIngestCursor {
+  id          String   @id @default("cliproxy")
+  lastEventAt DateTime?
+  updatedAt   DateTime @updatedAt
+}
+
+model UsageDaily {
+  id              String   @id @default(cuid())
+  date            DateTime
+  apiPath         String
+  model           String
+  proxyHost       String?
+  totalRequests   Int
+  inputTokens     Int
+  outputTokens    Int
+  reasoningTokens Int
+  cachedTokens    Int
+  totalTokens     Int
+  costUsd         Decimal @db.Decimal(12, 6)
+
+  authSource      String?
+  authIndex       Int?
+  authFailed      Boolean? @default(false)
+
+  @@unique([date, apiPath, model, proxyHost, authSource, authIndex, authFailed], name: "daily_composite_key")
+}
+
+model UsageAggregateJob {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  kind        String
+  rangeFrom   DateTime
+  rangeTo     DateTime
+  filters     Json?    @db.JsonB
+  filtersHash String   @default("all")
+
+  status      String
+  attempts    Int      @default(0)
+  workerId    String?
+  lockedAt    DateTime?
+  executionMs Int?
+
+  lastError   String?
+  summary     String?
+
+  @@unique([kind, rangeFrom, filtersHash])
+  @@index([status, rangeFrom])
+}
+
+model ModelPricing {
+  id           String   @id @default(cuid())
+  modelId      String   @unique
+  inputCost    Decimal  @db.Decimal(14, 6)
+  outputCost   Decimal  @db.Decimal(14, 6)
+  cachedCost   Decimal  @db.Decimal(14, 6)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
