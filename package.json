@@ -8,7 +8,10 @@
     "start": "npx serve .",
     "dev": "npx serve . -l 3090",
     "build": "node build.cjs",
-    "lint": "echo '使用浏览器开发者工具检查代码'"
+    "lint": "echo '使用浏览器开发者工具检查代码'",
+    "dev-next": "cd next-app && npm run dev",
+    "build-next": "cd next-app && npm run build",
+    "start-next": "cd next-app && npm run start"
   },
   "keywords": [
     "cli-proxy-api",
