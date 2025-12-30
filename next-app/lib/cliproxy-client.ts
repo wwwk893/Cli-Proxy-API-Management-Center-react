@@ -1,7 +1,4 @@
-import { serverEnv } from "@/lib/env";
-
-const MANAGEMENT_BASE = serverEnv.CLIPROXY_MANAGEMENT_BASE;
-const MANAGEMENT_KEY = serverEnv.CLIPROXY_MANAGEMENT_KEY;
+import { fetchManagementJson } from "@/lib/management/client";
 
 type LogsResponse = {
   lines: string[];
@@ -16,33 +13,13 @@ type ClearLogsResponse = {
 
 const DEFAULT_LOG_FETCH_LIMIT = 2500;
 
-async function callManagement(path: string, init: RequestInit = {}) {
-  if (!MANAGEMENT_KEY) {
-    throw new Error("CLIPROXY_MANAGEMENT_KEY is not set");
-  }
-  try {
-    const res = await fetch(`${MANAGEMENT_BASE}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${MANAGEMENT_KEY}`,
-        "Content-Type": "application/json",
-        ...(init.headers || {}),
-      },
-      cache: "no-store",
-    });
-
-    if (!res.ok) {
-      throw new Error(`Management API error: ${res.status} ${res.statusText}`);
-    }
-    return res.json();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to call management API: ${message}`);
-  }
+async function callManagementJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { data } = await fetchManagementJson<T>(path, init);
+  return data;
 }
 
 export async function fetchUsageRaw() {
-  return callManagement("/usage");
+  return callManagementJson("/usage");
 }
 
 export async function fetchLogs(params: { after?: string; limit?: number }): Promise<LogsResponse> {
@@ -57,13 +34,13 @@ export async function fetchLogs(params: { after?: string; limit?: number }): Pro
 
   const query = search.toString();
   const path = query ? `/logs?${query}` : "/logs";
-  return callManagement(path);
+  return callManagementJson(path);
 }
 
 export async function clearLogs(): Promise<ClearLogsResponse> {
-  return callManagement("/logs", { method: "DELETE" });
+  return callManagementJson("/logs", { method: "DELETE" });
 }
 
 export async function fetchLogsRaw(): Promise<LogsResponse> {
-  return callManagement("/logs");
+  return callManagementJson("/logs");
 }

@@ -1,0 +1,11 @@
+# 一行一个绝对路径（不要省略，不要缩写）
+/Users/wenlong/wt-next-migration/src/modules/oauth.js
+/Users/wenlong/wt-next-migration/next-app/app/settings/providers/page.tsx
+/Users/wenlong/wt-next-migration/next-app/app/api/providers/oauth-url/route.ts
+/Users/wenlong/wt-next-migration/next-app/app/api/providers/oauth-status/route.ts
+/Users/wenlong/wt-next-migration/next-app/app/auth-files/page.tsx
+/Users/wenlong/wt-next-migration/next-app/components/common/page-header.tsx
+/Users/wenlong/wt-next-migration/next-app/components/common/copy-button.tsx
+/Users/wenlong/wt-next-migration/next-app/components/layout/sidebar.tsx
+/Users/wenlong/wt-next-migration/next-app/components/i18n-context.tsx
+

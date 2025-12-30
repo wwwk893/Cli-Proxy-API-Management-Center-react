@@ -1,0 +1,84 @@
+【用途】
+本文件用于“上下文压缩/交接”，避免对话过长导致遗漏约束、忘记改动文件、或反复回读代码。
+
+【任务概览】
+- 任务：src→next-app 功能全量迁移
+- 任务目录：/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移
+- Worktree：/Users/wenlong/wt-next-migration
+- 分支：feat/next-migration
+- Base commit：83b13894bfd71f5ab9c404918f8468df6aa58bc1（基于 nextjs-rewrite）
+- 当前状态：待验证（已按实现方案落地完 1-10）
+- 证据包：feature/src→next-app 功能全量迁移/plan/evidence/exec-20251226-173624.zip
+
+【硬约束（必须遵守）】
+- 中文沟通/中文文档；最小 diff。
+- 禁止危险命令：git reset/clean/checkout -- / rm -rf 等（除非主人明确同意）。
+- 禁止 CI/CD 自动化：构建/测试由主人手动执行；我只提供命令建议。
+- src/ 保留但不作为入口；迁移后保持 src 原模块颗粒度（基础设置 / api-keys / ai-providers / oauth / auth-files / config / system 等）。
+- 安全：CLIPROXY_MANAGEMENT_KEY 必须 server-only；浏览器仅请求 Next 的 /api/*；不得在日志/错误详情中泄漏密钥/Authorization。
+- i18n：新增/修改用户可见文案必须 useI18n().t(key)，并补齐 next-app/components/i18n-context.tsx 的 en/zh。
+
+【当前实现结果（已完成清单）】
+1) 管理代理层（server-only）✅
+- next-app/lib/management/types.ts（ApiResult/错误模型）
+- next-app/lib/management/env.ts（env 解析）
+- next-app/lib/management/client.ts（server-only + fetchManagementRaw/Json/Text + 错误归一）
+
+2) cliproxy-client 迁移 ✅
+- next-app/lib/cliproxy-client.ts：统一走 lib/management/*
+
+3) /login + /system + /api/system/health ✅
+- next-app/app/api/system/health/route.ts
+- next-app/app/login/page.tsx
+- next-app/app/system/page.tsx
+- next-app/components/common/page-header.tsx
+- next-app/components/common/copy-button.tsx
+- next-app/components/i18n-context.tsx（补 login/system/health/common.copied 等 key）
+
+4) /settings + /api/settings ✅
+- next-app/app/api/settings/route.ts（GET 从 /config 提取非敏感字段；PATCH best-effort 回滚）
+- next-app/app/settings/page.tsx（表单 Save/Reset；失败可重试）
+- next-app/components/i18n-context.tsx（补 settings.* key）
+
+5) /settings/api-keys + /api/api-keys ✅
+- next-app/app/api/api-keys/route.ts（前端仅拿 maskedKey + index）
+- next-app/app/settings/api-keys/page.tsx
+- next-app/components/i18n-context.tsx（补 apiKeys.* key）
+
+6) /settings/providers + /api/providers（含 OAuth）✅
+- next-app/app/api/providers/route.ts（gemini/codex/claude/openai-compatibility：返回掩码；增删改）
+- next-app/app/api/providers/oauth-url/route.ts（生成 OAuth URL + state）
+- next-app/app/api/providers/oauth-status/route.ts（轮询 /get-auth-status）
+- next-app/app/settings/providers/page.tsx（Tabs：OAuth/Gemini/Codex/Claude/OpenAI 兼容）
+- next-app/components/common/provider-key-table.tsx
+- next-app/components/common/openai-compat-section.tsx
+- next-app/components/common/providers-types.ts
+- next-app/components/i18n-context.tsx（补 providers.* key）
+
+7) /auth-files + /api/auth-files ✅
+- next-app/app/api/auth-files/route.ts（list/upload/delete/delete-all）
+- next-app/app/api/auth-files/download/route.ts（download 透传 content-type/content-disposition）
+- next-app/app/auth-files/page.tsx（分页/搜索/类型筛选/详情/上传/下载/删除；runtime-only 禁用写操作）
+- next-app/components/i18n-context.tsx（补 authFiles.* key）
+
+8) /config + /api/config ✅
+- next-app/app/api/config/route.ts（GET/PUT /config.yaml；PUT 校验 json ok=false）
+- next-app/app/api/config/download/route.ts（下载服务端 config.yaml 备份）
+- next-app/app/config/page.tsx（DirtyGuard 覆盖刷新/关闭/点击站内链接；Save/Reload/Download）
+- next-app/components/i18n-context.tsx（补 config.* key）
+
+9) 侧边栏与 i18n 对齐 ✅
+- next-app/components/layout/sidebar.tsx：新增 /settings/api-keys
+- next-app/components/i18n-context.tsx：新增 nav.settings.apiKeys（en/zh）
+
+10) 执行证据包 ✅
+- feature/src→next-app 功能全量迁移/plan/evidence/exec-20251226-173624.zip
+
+【下一步（仅剩主人手动验证）】
+- 按 feature/src→next-app 功能全量迁移/实现方案.md 的“验证清单（手动）”逐项验收：
+  - /login /system /settings /settings/api-keys /settings/providers /auth-files /config
+  - 浏览器 Network 面板确认：只请求 /api/*，无 management base 直连、无明文 key
+
+【潜在已知小风险（如验证失败再修）】
+- /settings 页：requestRetry 的输入转换如果出现小数，应在后续修正为 int（parseInt/Math.floor）以符合后端校验。
+

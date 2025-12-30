@@ -1,0 +1,9 @@
+# 一行一个绝对路径（不要省略，不要缩写）
+/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移/plan/batch-1/legacy-oauth-notes.md
+/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移/plan/ui/batch-1/v4.final.md
+/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移/plan/ui/batch-1/review-package.md
+/Users/wenlong/wt-next-migration/next-app/lib/management/client.ts
+/Users/wenlong/wt-next-migration/next-app/lib/management/types.ts
+/Users/wenlong/wt-next-migration/next-app/lib/management/env.ts
+/Users/wenlong/wt-next-migration/next-app/app/api/providers/oauth-url/route.ts
+/Users/wenlong/wt-next-migration/next-app/app/api/providers/oauth-status/route.ts

@@ -10,9 +10,10 @@ type NavItem = { href: string; label: string };
 const getNavItems = (t: (key: string) => string): NavItem[] => [
   { href: "/", label: t("nav.dashboard") },
   { href: "/login", label: t("nav.login") },
+  { href: "/oauth", label: t("nav.oauth") },
   { href: "/settings", label: t("nav.settings") },
+  { href: "/settings/api-keys", label: t("nav.settings.apiKeys") },
   { href: "/settings/providers", label: t("nav.settings.providers") },
-  { href: "/auth-files", label: t("nav.authFiles") },
   { href: "/logs", label: t("nav.logs") },
   { href: "/usage", label: t("nav.usage") },
   { href: "/pipeline", label: t("nav.pipeline") },
@@ -23,7 +24,9 @@ const getNavItems = (t: (key: string) => string): NavItem[] => [
 
 function SidebarLink({ href, label }: { href: string; label: string }) {
   const pathname = usePathname();
-  const active = pathname === href || (href !== "/" && pathname.startsWith(`${href}/`));
+  const matchExactly = href === "/settings";
+  const active =
+    pathname === href || (!matchExactly && href !== "/" && pathname.startsWith(`${href}/`));
 
   return (
     <Link

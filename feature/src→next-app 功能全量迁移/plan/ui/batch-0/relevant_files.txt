@@ -1,0 +1,11 @@
+# 一行一个绝对路径（不要省略，不要缩写）
+/Users/wenlong/wt-next-migration/next-app/app/layout.tsx
+/Users/wenlong/wt-next-migration/next-app/app/globals.css
+/Users/wenlong/wt-next-migration/next-app/components/layout/sidebar.tsx
+/Users/wenlong/wt-next-migration/next-app/components/i18n-context.tsx
+/Users/wenlong/wt-next-migration/next-app/components/theme-context.tsx
+/Users/wenlong/wt-next-migration/next-app/app/usage/page.tsx
+/Users/wenlong/wt-next-migration/next-app/app/logs/page.tsx
+/Users/wenlong/wt-next-migration/next-app/app/pipeline/page.tsx
+/Users/wenlong/wt-next-migration/next-app/app/pricing/page.tsx
+/Users/wenlong/wt-next-migration/index.html

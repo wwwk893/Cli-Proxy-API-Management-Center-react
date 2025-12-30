@@ -1,0 +1,13 @@
+# 一行一个绝对路径（不要省略，不要缩写）
+/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移/任务计划.md
+/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移/需求分析.md
+/Users/wenlong/wt-next-migration/feature/src→next-app 功能全量迁移/UI设计.md
+/Users/wenlong/wt-next-migration/next-app/app/layout.tsx
+/Users/wenlong/wt-next-migration/next-app/components/layout/sidebar.tsx
+/Users/wenlong/wt-next-migration/next-app/components/theme-context.tsx
+/Users/wenlong/wt-next-migration/next-app/lib/env.ts
+/Users/wenlong/wt-next-migration/next-app/lib/db.ts
+/Users/wenlong/wt-next-migration/next-app/lib/cliproxy-client.ts
+/Users/wenlong/wt-next-migration/next-app/prisma/schema.prisma
+/Users/wenlong/wt-next-migration/next-app/app/api/logs/route.ts
+/Users/wenlong/wt-next-migration/next-app/app/api/model-pricing/route.ts

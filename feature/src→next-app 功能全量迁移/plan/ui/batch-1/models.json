@@ -1,0 +1,6 @@
+{
+  "expertA_model": "gemini-ui",
+  "expertB_model": "claude-opus-4.5",
+  "note": "模型别名来自 zen.listmodels；用于本批次 UI 草图取稿"
+}
+
