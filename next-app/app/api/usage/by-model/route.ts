@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { requireSession } from "@/lib/auth/session";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseSearchParams, usageByModelQuerySchema } from "@/lib/api";
@@ -8,6 +11,17 @@ const startOfUtcDay = (date: Date) =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
 
 export async function GET(req: NextRequest) {
+  try {
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
 
   const parsed = parseSearchParams(searchParams, usageByModelQuerySchema);
@@ -130,7 +144,7 @@ export async function GET(req: NextRequest) {
       prisma.modelPricing.findMany({ select: { modelId: true } }),
       loadPricingMap(),
     ]);
-    const configuredSet = new Set(pricingRows.map((row) => row.modelId));
+    const configuredSet = new Set(pricingRows.map((row: any) => row.modelId));
 
     const map = new Map<
       string,
@@ -213,8 +227,8 @@ export async function GET(req: NextRequest) {
       });
     };
 
-    dailyRows.forEach((row) => addRow(row));
-    eventRows.forEach((row) => addRow(row));
+    dailyRows.forEach((row: any) => addRow(row));
+    eventRows.forEach((row: any) => addRow(row));
 
     const round6 = (value: number) => Math.round(value * 1_000_000) / 1_000_000;
 

@@ -19,7 +19,7 @@ type PricingEntry = {
 
 type ModelListItem = { id: string; [key: string]: unknown };
 
-const MODELS_ENDPOINT = process.env.NEXT_PUBLIC_MODELS_ENDPOINT || "http://localhost:3818/v1/models";
+const MODELS_ENDPOINT = "/api/models";
 
 export function PricingClient() {
   const [models, setModels] = useState<ModelListItem[]>([]);

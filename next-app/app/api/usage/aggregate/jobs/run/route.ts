@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
 import { Prisma, UsageAggregateJob } from "@prisma/client";
 import type { AggregationFilters } from "@/lib/usage/aggregation-filters";
 
@@ -61,6 +65,18 @@ async function processJob(job: UsageAggregateJob) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    assertSameOrigin(req);
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const parsed = await parseJsonBody(req, usageJobRunSchema);
   if (!parsed.success) return parsed.error;
 

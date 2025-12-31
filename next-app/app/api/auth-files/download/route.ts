@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { fetchManagementRaw, toManagementError } from "@/lib/management/client";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementRawWithConfig, toManagementError } from "@/lib/management/client";
 import { fail } from "@/lib/management/types";
 
 export async function GET(req: NextRequest) {
@@ -11,7 +12,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetchManagementRaw(`/auth-files/download?name=${encodeURIComponent(name)}`, { method: "GET" });
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const res = await fetchManagementRawWithConfig(
+      config,
+      `/auth-files/download?name=${encodeURIComponent(name)}`,
+      { method: "GET" },
+    );
     const buffer = await res.arrayBuffer();
 
     const headers = new Headers();

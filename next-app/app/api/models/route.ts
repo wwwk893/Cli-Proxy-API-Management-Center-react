@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { asAuthError } from "@/lib/auth/errors";
+import { requireSession } from "@/lib/auth/session";
+
 type RawModel = {
   id?: string;
   name?: string;
@@ -10,25 +13,17 @@ type RawModelsResponse = {
   data?: RawModel[];
 };
 
-const DEFAULT_BASE = "http://127.0.0.1:3818";
-
-function getBaseUrl() {
-  const env = process.env.CLIPROXY_BASE_URL?.trim();
-  if (env && env.length > 0) return env.replace(/\/$/, "");
-  return DEFAULT_BASE;
-}
-
 export async function GET() {
-  const base = getBaseUrl();
-  const url = `${base}/v1/models`;
-
   try {
+    const session = await requireSession();
+    const url = `${session.serverBase}/v1/models`;
+
     const res = await fetch(url, { cache: "no-store" });
 
     if (!res.ok) {
       return NextResponse.json(
         { error: `Failed to fetch models: ${res.status} ${res.statusText}` },
-        { status: res.status || 502 },
+        { status: res.status && res.status >= 400 ? res.status : 502 },
       );
     }
 
@@ -46,6 +41,11 @@ export async function GET() {
 
     return NextResponse.json({ data });
   } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `Models endpoint error: ${message}` }, { status: 502 });
   }

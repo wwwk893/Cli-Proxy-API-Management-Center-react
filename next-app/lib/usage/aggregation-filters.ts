@@ -90,5 +90,5 @@ export const buildUsageEventFilterSql = (filters?: AggregationFilters, tableAlia
   }
 
   if (!conditions.length) return Prisma.sql``;
-  return Prisma.sql`AND ${Prisma.join(conditions, Prisma.sql` AND `)}`;
+  return Prisma.sql`AND ${Prisma.join(conditions, " AND ")}`;
 };

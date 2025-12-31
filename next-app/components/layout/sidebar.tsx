@@ -9,7 +9,6 @@ type NavItem = { href: string; label: string };
 
 const getNavItems = (t: (key: string) => string): NavItem[] => [
   { href: "/", label: t("nav.dashboard") },
-  { href: "/login", label: t("nav.login") },
   { href: "/oauth", label: t("nav.oauth") },
   { href: "/settings", label: t("nav.settings") },
   { href: "/settings/api-keys", label: t("nav.settings.apiKeys") },

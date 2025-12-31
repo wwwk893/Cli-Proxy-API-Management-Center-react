@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { requireSession } from "@/lib/auth/session";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseSearchParams, usageSessionEventsQuerySchema } from "@/lib/api";
@@ -7,6 +10,17 @@ export async function GET(
   req: NextRequest,
   context: { params: Promise<{ sessionId: string }> }
 ) {
+  try {
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
   const parsed = parseSearchParams(searchParams, usageSessionEventsQuerySchema);
   if (!parsed.success) return parsed.error;
@@ -130,7 +144,7 @@ export async function GET(
         totalTokens: Number(meta.totalTokens ?? 0),
         costUsd: Number(meta.costUsd ?? 0),
       },
-      events: (events ?? []).map((e) => ({
+      events: (events ?? []).map((e: any) => ({
         eventTime: e.eventTime instanceof Date ? e.eventTime.toISOString() : e.eventTime,
         model: e.model,
         inputTokens: Number(e.inputTokens ?? 0),

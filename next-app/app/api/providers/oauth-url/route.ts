@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { fetchManagementJson, toManagementError } from "@/lib/management/client";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementJsonWithConfig, toManagementError } from "@/lib/management/client";
 import { fail, ok } from "@/lib/management/types";
 
 const providerEnum = z.enum([
@@ -48,8 +49,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
     const endpoint = mapProviderToEndpoint(providerParsed.data);
-    const { data } = await fetchManagementJson<{ url: string }>(endpoint);
+    const { data } = await fetchManagementJsonWithConfig<{ url: string }>(config, endpoint);
     const url = data?.url || "";
     const state = url ? extractStateFromUrl(url) : null;
     return NextResponse.json(ok({ provider: providerParsed.data, url, state }));

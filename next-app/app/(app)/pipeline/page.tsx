@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 
-import JobsView from "@/app/pipeline/aggregation/jobs-view";
-import { JobsResponse } from "@/app/pipeline/aggregation/types";
+import JobsView from "./aggregation/jobs-view";
+import { JobsResponse } from "./aggregation/types";
 
 async function fetchInitialJobs(): Promise<JobsResponse> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";

@@ -32,7 +32,9 @@ function equals(a: SettingsData, b: SettingsData) {
 function diffSettings(base: SettingsData, next: SettingsData): Partial<SettingsData> {
   const out: Partial<SettingsData> = {};
   (Object.keys(next) as Array<keyof SettingsData>).forEach((k) => {
-    if (next[k] !== base[k]) out[k] = next[k];
+    if (next[k] !== base[k]) {
+      (out as Partial<Record<keyof SettingsData, SettingsData[keyof SettingsData]>>)[k] = next[k];
+    }
   });
   return out;
 }

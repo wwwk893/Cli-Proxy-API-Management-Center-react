@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { fetchManagementJson, fetchManagementRaw, toManagementError } from "@/lib/management/client";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementJsonWithConfig, fetchManagementRawWithConfig, toManagementError } from "@/lib/management/client";
 import { fail, ok } from "@/lib/management/types";
 
 type AuthFileEntry = {
@@ -57,7 +59,10 @@ function normalizeAuthFile(raw: unknown): AuthFileEntry | null {
 
 export async function GET() {
   try {
-    const { data } = await fetchManagementJson<Record<string, unknown>>("/auth-files", { method: "GET" });
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const { data } = await fetchManagementJsonWithConfig<Record<string, unknown>>(config, "/auth-files", { method: "GET" });
     const rawFiles = (data as any)?.files;
     const files = Array.isArray(rawFiles) ? rawFiles.map(normalizeAuthFile).filter(Boolean) : [];
     return NextResponse.json(ok({ files }));
@@ -75,26 +80,30 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let form: FormData;
   try {
-    form = await req.formData();
-  } catch {
-    return NextResponse.json(fail("VALIDATION_ERROR", "Invalid form data"), { status: 400 });
-  }
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
 
-  const file = form.get("file");
-  if (!file || !(file instanceof File)) {
-    return NextResponse.json(fail("VALIDATION_ERROR", "Missing file"), { status: 400 });
-  }
-  if (!file.name.endsWith(".json")) {
-    return NextResponse.json(fail("VALIDATION_ERROR", "Only .json files are allowed"), { status: 400 });
-  }
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      return NextResponse.json(fail("VALIDATION_ERROR", "Invalid form data"), { status: 400 });
+    }
 
-  const upstream = new FormData();
-  upstream.set("file", file, file.name);
+    const file = form.get("file");
+    if (!file || !(file instanceof File)) {
+      return NextResponse.json(fail("VALIDATION_ERROR", "Missing file"), { status: 400 });
+    }
+    if (!file.name.endsWith(".json")) {
+      return NextResponse.json(fail("VALIDATION_ERROR", "Only .json files are allowed"), { status: 400 });
+    }
 
-  try {
-    await fetchManagementRaw("/auth-files", { method: "POST", body: upstream });
+    const upstream = new FormData();
+    upstream.set("file", file, file.name);
+
+    await fetchManagementRawWithConfig(config, "/auth-files", { method: "POST", body: upstream });
     return NextResponse.json(ok({ uploaded: true }));
   } catch (err) {
     const managementError = toManagementError(err);
@@ -110,33 +119,28 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const all = searchParams.get("all");
-  const name = (searchParams.get("name") || "").trim();
-
-  if (all === "true" || all === "1") {
-    try {
-      const { data } = await fetchManagementJson<Record<string, unknown>>("/auth-files?all=true", { method: "DELETE" });
-      return NextResponse.json(ok(data));
-    } catch (err) {
-      const managementError = toManagementError(err);
-      const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
-      return NextResponse.json(
-        fail(managementError.code, managementError.message, {
-          retryable: managementError.retryable,
-          httpStatus: managementError.httpStatus,
-        }),
-        { status },
-      );
-    }
-  }
-
-  if (!name) {
-    return NextResponse.json(fail("VALIDATION_ERROR", "Missing name"), { status: 400 });
-  }
-
   try {
-    const { data } = await fetchManagementJson<Record<string, unknown>>(
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const { searchParams } = new URL(req.url);
+    const all = searchParams.get("all");
+    const name = (searchParams.get("name") || "").trim();
+
+    if (all === "true" || all === "1") {
+      const { data } = await fetchManagementJsonWithConfig<Record<string, unknown>>(config, "/auth-files?all=true", {
+        method: "DELETE",
+      });
+      return NextResponse.json(ok(data));
+    }
+
+    if (!name) {
+      return NextResponse.json(fail("VALIDATION_ERROR", "Missing name"), { status: 400 });
+    }
+
+    const { data } = await fetchManagementJsonWithConfig<Record<string, unknown>>(
+      config,
       `/auth-files?name=${encodeURIComponent(name)}`,
       { method: "DELETE" },
     );

@@ -1,12 +1,28 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+
 import { Prisma } from "@prisma/client";
 
+import { asAuthError } from "@/lib/auth/errors";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 
-type Params = { params: { id: string } };
+type RouteContext = { params: Promise<{ id: string }> };
 
-export async function DELETE(_: Request, { params }: Params) {
-  const id = params?.id;
+export async function DELETE(req: NextRequest, { params }: RouteContext) {
+  try {
+    assertSameOrigin(req);
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
+  const { id } = await params;
   if (!id) {
     return NextResponse.json({ error: "Missing job id" }, { status: 400 });
   }

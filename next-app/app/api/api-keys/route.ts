@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { fetchManagementJson, fetchManagementRaw, toManagementError } from "@/lib/management/client";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementJsonWithConfig, fetchManagementRawWithConfig, toManagementError } from "@/lib/management/client";
 import { fail, ok } from "@/lib/management/types";
 
 type ApiKeyRow = {
@@ -20,8 +22,8 @@ function maskKey(value: string) {
   return `${v.slice(0, 4)}…${v.slice(-4)}`;
 }
 
-async function readKeysRaw(): Promise<string[]> {
-  const { data } = await fetchManagementJson<Record<string, unknown>>("/api-keys", { method: "GET" });
+async function readKeysRaw(config: { serverBase: string; key: string }): Promise<string[]> {
+  const { data } = await fetchManagementJsonWithConfig<Record<string, unknown>>(config, "/api-keys", { method: "GET" });
   const raw = data["api-keys"];
   const list = Array.isArray(raw) ? raw : [];
   return list.map((k) => (typeof k === "string" ? k : String(k ?? ""))).filter(Boolean);
@@ -51,7 +53,10 @@ const patchSchema = z
 
 export async function GET() {
   try {
-    const keys = await readKeysRaw();
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const keys = await readKeysRaw(config);
     return NextResponse.json(ok(toMasked(keys)));
   } catch (err) {
     const managementError = toManagementError(err);
@@ -80,14 +85,18 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const current = await readKeysRaw();
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const current = await readKeysRaw(config);
     const value = parsed.data.value.trim();
     if (current.includes(value)) {
       return NextResponse.json(fail("VALIDATION_ERROR", "Key already exists"), { status: 400 });
     }
 
     const next = [...current, value];
-    await fetchManagementRaw("/api-keys", {
+    await fetchManagementRawWithConfig(config, "/api-keys", {
       method: "PUT",
       body: JSON.stringify(next),
     });
@@ -120,12 +129,16 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
-    await fetchManagementRaw("/api-keys", {
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    await fetchManagementRawWithConfig(config, "/api-keys", {
       method: "PATCH",
       body: JSON.stringify({ index: parsed.data.index, value: parsed.data.value.trim() }),
     });
 
-    const after = await readKeysRaw();
+    const after = await readKeysRaw(config);
     return NextResponse.json(ok(toMasked(after)));
   } catch (err) {
     const managementError = toManagementError(err);
@@ -149,8 +162,16 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
-    await fetchManagementRaw(`/api-keys?index=${encodeURIComponent(String(index))}`, { method: "DELETE" });
-    const after = await readKeysRaw();
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    await fetchManagementRawWithConfig(
+      config,
+      `/api-keys?index=${encodeURIComponent(String(index))}`,
+      { method: "DELETE" },
+    );
+    const after = await readKeysRaw(config);
     return NextResponse.json(ok(toMasked(after)));
   } catch (err) {
     const managementError = toManagementError(err);

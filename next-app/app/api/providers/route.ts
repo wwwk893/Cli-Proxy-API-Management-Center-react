@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { fetchManagementJson, fetchManagementRaw, toManagementError } from "@/lib/management/client";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementJsonWithConfig, fetchManagementRawWithConfig, toManagementError } from "@/lib/management/client";
 import { fail, ok } from "@/lib/management/types";
 
 type ProviderKeyEntry = {
@@ -117,21 +119,30 @@ function normalizeOpenAIProviders(items: unknown[]): OpenAIProviderEntry[] {
   });
 }
 
-async function readProviderList(endpoint: string, responseKey: string): Promise<unknown[]> {
-  const { data } = await fetchManagementJson<Record<string, unknown>>(endpoint, { method: "GET" });
+async function readProviderList(
+  config: { serverBase: string; key: string },
+  endpoint: string,
+  responseKey: string,
+): Promise<unknown[]> {
+  const { data } = await fetchManagementJsonWithConfig<Record<string, unknown>>(config, endpoint, { method: "GET" });
   const raw = data[responseKey];
   return Array.isArray(raw) ? raw : [];
 }
 
-async function putProviderList(endpoint: string, payload: unknown[]) {
-  await fetchManagementRaw(endpoint, {
+async function putProviderList(config: { serverBase: string; key: string }, endpoint: string, payload: unknown[]) {
+  await fetchManagementRawWithConfig(config, endpoint, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
-async function patchProviderItem(endpoint: string, index: number, value: unknown) {
-  await fetchManagementRaw(endpoint, {
+async function patchProviderItem(
+  config: { serverBase: string; key: string },
+  endpoint: string,
+  index: number,
+  value: unknown,
+) {
+  await fetchManagementRawWithConfig(config, endpoint, {
     method: "PATCH",
     body: JSON.stringify({ index, value }),
   });
@@ -150,12 +161,12 @@ function keyProviderToEndpoint(provider: "gemini" | "codex" | "claude") {
 
 const OPENAI_COMPAT = { endpoint: "/openai-compatibility", responseKey: "openai-compatibility" } as const;
 
-async function readAllProviders(): Promise<ProvidersData> {
+async function readAllProviders(config: { serverBase: string; key: string }): Promise<ProvidersData> {
   const [geminiRaw, codexRaw, claudeRaw, openaiRaw] = await Promise.all([
-    readProviderList("/gemini-api-key", "gemini-api-key"),
-    readProviderList("/codex-api-key", "codex-api-key"),
-    readProviderList("/claude-api-key", "claude-api-key"),
-    readProviderList(OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey),
+    readProviderList(config, "/gemini-api-key", "gemini-api-key"),
+    readProviderList(config, "/codex-api-key", "codex-api-key"),
+    readProviderList(config, "/claude-api-key", "claude-api-key"),
+    readProviderList(config, OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey),
   ]);
 
   return {
@@ -251,7 +262,10 @@ function mergeKeyEntry(existing: Record<string, unknown>, next: z.infer<typeof k
 
 export async function GET() {
   try {
-    return NextResponse.json(ok(await readAllProviders()));
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    return NextResponse.json(ok(await readAllProviders(config)));
   } catch (err) {
     const managementError = toManagementError(err);
     const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
@@ -266,6 +280,23 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  let config: { serverBase: string; key: string };
+  try {
+    assertSameOrigin(req);
+    const session = await requireSession();
+    config = { serverBase: session.serverBase, key: session.adminKey };
+  } catch (err) {
+    const managementError = toManagementError(err);
+    const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
+    return NextResponse.json(
+      fail(managementError.code, managementError.message, {
+        retryable: managementError.retryable,
+        httpStatus: managementError.httpStatus,
+      }),
+      { status },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -303,10 +334,10 @@ export async function POST(req: NextRequest) {
     });
 
     try {
-      const current = await readProviderList(OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey);
+      const current = await readProviderList(config, OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey);
       const next = [...current, { name, "base-url": baseUrl, "api-key-entries": keys }];
-      await putProviderList(OPENAI_COMPAT.endpoint, next);
-      return NextResponse.json(ok(await readAllProviders()));
+      await putProviderList(config, OPENAI_COMPAT.endpoint, next);
+      return NextResponse.json(ok(await readAllProviders(config)));
     } catch (err) {
       const managementError = toManagementError(err);
       const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
@@ -337,7 +368,7 @@ export async function POST(req: NextRequest) {
   const { endpoint, responseKey } = keyProviderToEndpoint(parsed.data.provider);
 
   try {
-    const current = await readProviderList(endpoint, responseKey);
+    const current = await readProviderList(config, endpoint, responseKey);
     const exists = current.some((raw) => asString(asRecord(raw)["api-key"]).trim() === apiKey);
     if (exists) {
       return NextResponse.json(fail("VALIDATION_ERROR", "apiKey already exists"), { status: 400 });
@@ -347,8 +378,8 @@ export async function POST(req: NextRequest) {
     if (baseUrl) nextItem["base-url"] = baseUrl;
     if (proxyUrl) nextItem["proxy-url"] = proxyUrl;
 
-    await putProviderList(endpoint, [...current, nextItem]);
-    return NextResponse.json(ok(await readAllProviders()));
+    await putProviderList(config, endpoint, [...current, nextItem]);
+    return NextResponse.json(ok(await readAllProviders(config)));
   } catch (err) {
     const managementError = toManagementError(err);
     const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
@@ -363,6 +394,23 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  let config: { serverBase: string; key: string };
+  try {
+    assertSameOrigin(req);
+    const session = await requireSession();
+    config = { serverBase: session.serverBase, key: session.adminKey };
+  } catch (err) {
+    const managementError = toManagementError(err);
+    const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
+    return NextResponse.json(
+      fail(managementError.code, managementError.message, {
+        retryable: managementError.retryable,
+        httpStatus: managementError.httpStatus,
+      }),
+      { status },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -394,7 +442,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     try {
-      const current = await readProviderList(OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey);
+      const current = await readProviderList(config, OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey);
       if (index < 0 || index >= current.length) {
         return NextResponse.json(fail("VALIDATION_ERROR", "index out of range"), { status: 400 });
       }
@@ -448,8 +496,8 @@ export async function PATCH(req: NextRequest) {
         delete merged["api-keys"];
       }
 
-      await patchProviderItem(OPENAI_COMPAT.endpoint, index, merged);
-      return NextResponse.json(ok(await readAllProviders()));
+      await patchProviderItem(config, OPENAI_COMPAT.endpoint, index, merged);
+      return NextResponse.json(ok(await readAllProviders(config)));
     } catch (err) {
       const managementError = toManagementError(err);
       const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
@@ -474,7 +522,7 @@ export async function PATCH(req: NextRequest) {
 
   const { endpoint, responseKey } = keyProviderToEndpoint(parsed.data.provider);
   try {
-    const current = await readProviderList(endpoint, responseKey);
+    const current = await readProviderList(config, endpoint, responseKey);
     if (index < 0 || index >= current.length) {
       return NextResponse.json(fail("VALIDATION_ERROR", "index out of range"), { status: 400 });
     }
@@ -499,8 +547,8 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json(fail("VALIDATION_ERROR", "apiKey already exists"), { status: 400 });
     }
 
-    await patchProviderItem(endpoint, index, merged);
-    return NextResponse.json(ok(await readAllProviders()));
+    await patchProviderItem(config, endpoint, index, merged);
+    return NextResponse.json(ok(await readAllProviders(config)));
   } catch (err) {
     const managementError = toManagementError(err);
     const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
@@ -515,6 +563,23 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  let config: { serverBase: string; key: string };
+  try {
+    assertSameOrigin(req);
+    const session = await requireSession();
+    config = { serverBase: session.serverBase, key: session.adminKey };
+  } catch (err) {
+    const managementError = toManagementError(err);
+    const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
+    return NextResponse.json(
+      fail(managementError.code, managementError.message, {
+        retryable: managementError.retryable,
+        httpStatus: managementError.httpStatus,
+      }),
+      { status },
+    );
+  }
+
   const { searchParams } = new URL(req.url);
   const providerParsed = providerEnum.safeParse(searchParams.get("provider"));
   if (!providerParsed.success) {
@@ -529,7 +594,7 @@ export async function DELETE(req: NextRequest) {
 
   if (providerParsed.data === "openaiCompat") {
     try {
-      const current = await readProviderList(OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey);
+      const current = await readProviderList(config, OPENAI_COMPAT.endpoint, OPENAI_COMPAT.responseKey);
       if (index < 0 || index >= current.length) {
         return NextResponse.json(fail("VALIDATION_ERROR", "index out of range"), { status: 400 });
       }
@@ -537,13 +602,17 @@ export async function DELETE(req: NextRequest) {
       const obj = asRecord(current[index]);
       const name = asString(obj.name).trim();
       if (name) {
-        await fetchManagementRaw(`${OPENAI_COMPAT.endpoint}?name=${encodeURIComponent(name)}`, { method: "DELETE" });
-        return NextResponse.json(ok(await readAllProviders()));
+        await fetchManagementRawWithConfig(
+          config,
+          `${OPENAI_COMPAT.endpoint}?name=${encodeURIComponent(name)}`,
+          { method: "DELETE" },
+        );
+        return NextResponse.json(ok(await readAllProviders(config)));
       }
 
       const next = current.filter((_, i) => i !== index);
-      await putProviderList(OPENAI_COMPAT.endpoint, next);
-      return NextResponse.json(ok(await readAllProviders()));
+      await putProviderList(config, OPENAI_COMPAT.endpoint, next);
+      return NextResponse.json(ok(await readAllProviders(config)));
     } catch (err) {
       const managementError = toManagementError(err);
       const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
@@ -559,7 +628,7 @@ export async function DELETE(req: NextRequest) {
 
   const { endpoint, responseKey } = keyProviderToEndpoint(providerParsed.data);
   try {
-    const current = await readProviderList(endpoint, responseKey);
+    const current = await readProviderList(config, endpoint, responseKey);
     if (index < 0 || index >= current.length) {
       return NextResponse.json(fail("VALIDATION_ERROR", "index out of range"), { status: 400 });
     }
@@ -567,13 +636,13 @@ export async function DELETE(req: NextRequest) {
     const obj = asRecord(current[index]);
     const apiKey = asString(obj["api-key"]).trim();
     if (apiKey) {
-      await fetchManagementRaw(`${endpoint}?api-key=${encodeURIComponent(apiKey)}`, { method: "DELETE" });
-      return NextResponse.json(ok(await readAllProviders()));
+      await fetchManagementRawWithConfig(config, `${endpoint}?api-key=${encodeURIComponent(apiKey)}`, { method: "DELETE" });
+      return NextResponse.json(ok(await readAllProviders(config)));
     }
 
     const next = current.filter((_, i) => i !== index);
-    await putProviderList(endpoint, next);
-    return NextResponse.json(ok(await readAllProviders()));
+    await putProviderList(config, endpoint, next);
+    return NextResponse.json(ok(await readAllProviders(config)));
   } catch (err) {
     const managementError = toManagementError(err);
     const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;

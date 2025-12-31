@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { fetchManagementRaw, fetchManagementText, toManagementError } from "@/lib/management/client";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementRawWithConfig, fetchManagementTextWithConfig, toManagementError } from "@/lib/management/client";
 import { fail, ok } from "@/lib/management/types";
 
 const putSchema = z
@@ -12,7 +14,10 @@ const putSchema = z
 
 export async function GET() {
   try {
-    const { text, headers } = await fetchManagementText("/config.yaml", {
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const { text, headers } = await fetchManagementTextWithConfig(config, "/config.yaml", {
       method: "GET",
       headers: { Accept: "application/yaml" },
     });
@@ -53,7 +58,11 @@ export async function PUT(req: NextRequest) {
   }
 
   try {
-    const res = await fetchManagementRaw("/config.yaml", {
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const res = await fetchManagementRawWithConfig(config, "/config.yaml", {
       method: "PUT",
       headers: {
         "Content-Type": "application/yaml",

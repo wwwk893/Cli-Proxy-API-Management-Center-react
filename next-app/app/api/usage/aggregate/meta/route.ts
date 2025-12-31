@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { asAuthError } from "@/lib/auth/errors";
+import { requireSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { AGGREGATION_CHANNELS } from "@/lib/usage/aggregation-constants";
 
@@ -10,6 +12,8 @@ const toUtcDateString = (date: Date) => date.toISOString().slice(0, 10);
 
 export async function GET() {
   try {
+    await requireSession();
+
     const [minEvent, models] = await Promise.all([
       prisma.usageEvent.aggregate({ _min: { eventTime: true } }),
       prisma.usageEvent.findMany({
@@ -27,12 +31,17 @@ export async function GET() {
 
     return NextResponse.json({
       channels: AGGREGATION_CHANNELS,
-      models: models.map((m) => m.model).filter(Boolean),
+      models: models.map((m: { model: string | null }) => m.model).filter(Boolean),
       earliestEventTime,
       earliestUtcDate,
       yesterdayUtcDate,
     });
   } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+
     const message = err instanceof Error ? err.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

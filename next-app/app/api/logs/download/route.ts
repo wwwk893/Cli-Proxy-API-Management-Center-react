@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 
-import { fetchLogsRaw } from "@/lib/cliproxy-client";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementJsonWithConfig, toManagementError } from "@/lib/management/client";
+
+type LogsResponse = {
+  lines?: string[];
+};
 
 export async function GET() {
   try {
-    const data = await fetchLogsRaw();
-    const lines = data?.lines ?? [];
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const { data } = await fetchManagementJsonWithConfig<LogsResponse>(config, "/logs", { method: "GET" });
+    const lines = Array.isArray(data?.lines) ? data.lines : [];
     const body = lines.join("\n");
     const filename = `cli-proxy-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
 
@@ -16,8 +24,9 @@ export async function GET() {
         "Content-Disposition": `attachment; filename=${filename}`,
       },
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (err) {
+    const managementError = toManagementError(err);
+    const status = managementError.httpStatus && managementError.httpStatus >= 400 ? managementError.httpStatus : 500;
+    return NextResponse.json({ error: managementError.message }, { status });
   }
 }

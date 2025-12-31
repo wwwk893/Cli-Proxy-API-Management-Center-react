@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import {
   parseJsonBody,
@@ -28,9 +32,15 @@ function serialize(entry: {
 
 export async function GET() {
   try {
+    await requireSession();
     const rows = await prisma.modelPricing.findMany({ orderBy: { modelId: "asc" } });
     return NextResponse.json({ data: rows.map(serialize) });
   } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+
     console.error("Model pricing GET error:", err);
     const message = err instanceof Error ? err.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
@@ -38,6 +48,18 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    assertSameOrigin(req);
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const parsed = await parseJsonBody(req, modelPricingCreateSchema);
   if (!parsed.success) {
     return parsed.error;
@@ -60,6 +82,18 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  try {
+    assertSameOrigin(req);
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
   const modelIdParam = searchParams.get("modelId");
 

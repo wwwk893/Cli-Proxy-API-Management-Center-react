@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { fetchManagementJson, toManagementError } from "@/lib/management/client";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
+import { fetchManagementJsonWithConfig, toManagementError } from "@/lib/management/client";
 import { fail, ok } from "@/lib/management/types";
 
 const schema = z
@@ -51,7 +53,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { data } = await fetchManagementJson<Record<string, unknown>>("/iflow-auth-url", {
+    assertSameOrigin(req);
+    const session = await requireSession();
+    const config = { serverBase: session.serverBase, key: session.adminKey };
+
+    const { data } = await fetchManagementJsonWithConfig<Record<string, unknown>>(config, "/iflow-auth-url", {
       method: "POST",
       body: JSON.stringify({ cookie }),
     });

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { asAuthError } from "@/lib/auth/errors";
 import { readManagementEnv } from "@/lib/management/env";
 import type { ManagementError, ManagementErrorCode } from "@/lib/management/types";
 
@@ -51,42 +52,29 @@ function normalizePath(path: string) {
   return `/${path}`;
 }
 
-export function toManagementError(err: unknown): ManagementError {
-  if (err instanceof ManagementRequestError) {
-    return {
-      code: err.code,
-      message: err.message,
-      retryable: err.retryable,
-      httpStatus: err.httpStatus,
-      details: err.details,
-    };
-  }
+export type ManagementConfig = {
+  serverBase: string;
+  key: string;
+};
 
-  const message = err instanceof Error ? err.message : "Unknown error";
-  return {
-    code: "UNKNOWN",
-    message,
-    retryable: false,
-  };
+function ensureManagementUrlFromServerBase(serverBase: string): string {
+  const base = (serverBase || "").trim().replace(/\/+$/g, "");
+  if (!base) return "/v0/management";
+  if (/\/v0\/management$/i.test(base)) return base;
+  return `${base}/v0/management`;
 }
 
-export async function fetchManagementRaw(path: string, init: RequestInit = {}): Promise<Response> {
-  const { managementUrl, managementKey, hasKey } = readManagementEnv();
-  if (!hasKey) {
-    throw new ManagementRequestError({
-      code: "ENV_MISSING",
-      message: "服务端未配置 CLIPROXY_MANAGEMENT_KEY",
-      retryable: false,
-    });
-  }
-
-  const url = `${managementUrl}${normalizePath(path)}`;
+async function fetchManagementRawWithUrlAndKey(
+  params: { managementUrl: string; managementKey: string },
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const url = `${params.managementUrl}${normalizePath(path)}`;
   const headers = new Headers(init.headers || {});
-  headers.set("Authorization", `Bearer ${managementKey}`);
+  headers.set("Authorization", `Bearer ${params.managementKey}`);
 
   const body = init.body;
-  const isFormData =
-    typeof FormData !== "undefined" && body instanceof FormData;
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
 
   if (!isFormData && body !== undefined && body !== null) {
     const hasContentType = Array.from(headers.keys()).some((k) => k.toLowerCase() === "content-type");
@@ -123,6 +111,96 @@ export async function fetchManagementRaw(path: string, init: RequestInit = {}): 
   }
 
   return res;
+}
+
+export function toManagementError(err: unknown): ManagementError {
+  if (err instanceof ManagementRequestError) {
+    return {
+      code: err.code,
+      message: err.message,
+      retryable: err.retryable,
+      httpStatus: err.httpStatus,
+      details: err.details,
+    };
+  }
+
+  const authError = asAuthError(err);
+  if (authError) {
+    const code: ManagementErrorCode =
+      authError.code === "MISCONFIGURED"
+        ? "ENV_MISSING"
+        : authError.code === "VALIDATION_ERROR"
+          ? "VALIDATION_ERROR"
+          : "UNAUTHORIZED";
+
+    return {
+      code,
+      message: authError.message,
+      retryable: false,
+      httpStatus: authError.status,
+      details: authError.details,
+    };
+  }
+
+  const message = err instanceof Error ? err.message : "Unknown error";
+  return {
+    code: "UNKNOWN",
+    message,
+    retryable: false,
+  };
+}
+
+export async function fetchManagementRaw(path: string, init: RequestInit = {}): Promise<Response> {
+  const { managementUrl, managementKey, hasKey } = readManagementEnv();
+  if (!hasKey) {
+    throw new ManagementRequestError({
+      code: "ENV_MISSING",
+      message: "服务端未配置 CLIPROXY_MANAGEMENT_KEY",
+      retryable: false,
+      httpStatus: 500,
+    });
+  }
+
+  return fetchManagementRawWithUrlAndKey({ managementUrl, managementKey: managementKey || "" }, path, init);
+}
+
+export async function fetchManagementRawWithConfig(
+  config: ManagementConfig,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const managementKey = (config.key || "").trim();
+  if (!managementKey) {
+    throw new ManagementRequestError({
+      code: "UNAUTHORIZED",
+      message: "缺少管理密钥",
+      retryable: false,
+      httpStatus: 401,
+    });
+  }
+
+  const managementUrl = ensureManagementUrlFromServerBase(config.serverBase);
+  return fetchManagementRawWithUrlAndKey({ managementUrl, managementKey }, path, init);
+}
+
+export async function fetchManagementJsonWithConfig<T>(
+  config: ManagementConfig,
+  path: string,
+  init: RequestInit = {},
+): Promise<{ data: T; headers: Headers }> {
+  const res = await fetchManagementRawWithConfig(config, path, init);
+  const data = (await res.json()) as T;
+  return { data, headers: res.headers };
+}
+
+export async function fetchManagementTextWithConfig(
+  config: ManagementConfig,
+  path: string,
+  init: RequestInit = {},
+): Promise<{ text: string; headers: Headers }> {
+  const res = await fetchManagementRawWithConfig(config, path, init);
+  const text = await res.text();
+  return { text, headers: res.headers };
 }
 
 export async function fetchManagementJson<T>(path: string, init: RequestInit = {}): Promise<{ data: T; headers: Headers }> {

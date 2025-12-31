@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { assertSameOrigin } from "@/lib/auth/guards";
+import { requireSession } from "@/lib/auth/session";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
@@ -27,6 +31,17 @@ function getDaysBetween(from: Date, to: Date) {
 }
 
 export async function GET(req: NextRequest) {
+  try {
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
   const parsed = parseSearchParams(searchParams, usageJobListQuerySchema);
   if (!parsed.success) return parsed.error;
@@ -72,6 +87,18 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    assertSameOrigin(req);
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const body = await parseJsonBody(req, usageJobCreateSchema);
   if (!body.success) return body.error;
 
@@ -88,7 +115,9 @@ export async function POST(req: NextRequest) {
       select: { model: true },
       orderBy: { model: "asc" },
     });
-    allModels = models.map((item) => item.model).filter((model): model is string => Boolean(model));
+    allModels = models
+      .map((item: any) => item.model)
+      .filter((model: any): model is string => Boolean(model));
   }
   const { hash: filtersHash, normalized: normalizedFilters } = buildFiltersHash(filters, { allModels });
 

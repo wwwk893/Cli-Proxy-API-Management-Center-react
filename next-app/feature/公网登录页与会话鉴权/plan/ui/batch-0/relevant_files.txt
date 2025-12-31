@@ -1,0 +1,13 @@
+# 一行一个绝对路径（不要省略，不要缩写）
+/Users/wenlong/wt-next-migration/next-app/feature/公网登录页与会话鉴权/UI设计.md
+/Users/wenlong/wt-next-migration/next-app/feature/公网登录页与会话鉴权/任务计划.md
+/Users/wenlong/wt-next-migration/next-app/components/ui/button.tsx
+/Users/wenlong/wt-next-migration/next-app/components/ui/card.tsx
+/Users/wenlong/wt-next-migration/next-app/components/ui/input.tsx
+/Users/wenlong/wt-next-migration/next-app/components/ui/label.tsx
+/Users/wenlong/wt-next-migration/next-app/components/ui/dropdown-menu.tsx
+/Users/wenlong/wt-next-migration/next-app/components/ui/tooltip.tsx
+/Users/wenlong/wt-next-migration/next-app/components/i18n-context.tsx
+/Users/wenlong/wt-next-migration/next-app/app/globals.css
+/Users/wenlong/wt-next-migration/next-app/app/layout.tsx
+/Users/wenlong/wt-next-migration/next-app/app/login/page.tsx

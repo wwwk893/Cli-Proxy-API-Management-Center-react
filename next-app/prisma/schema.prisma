@@ -101,3 +101,22 @@ model ModelPricing {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
+model ManagementSession {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lastUsedAt    DateTime?
+  expiresAt     DateTime
+  revokedAt     DateTime?
+
+  tokenHash     String   @unique
+  serverBase    String
+
+  keyCiphertext Bytes
+  keyIv         Bytes
+  keyTag        Bytes
+
+  @@index([expiresAt])
+}

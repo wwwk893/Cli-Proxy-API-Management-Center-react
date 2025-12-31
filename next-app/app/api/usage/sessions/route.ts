@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { requireSession } from "@/lib/auth/session";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseSearchParams, usageSessionsQuerySchema } from "@/lib/api";
@@ -6,6 +9,17 @@ import { parseSearchParams, usageSessionsQuerySchema } from "@/lib/api";
 type FacetRow = { value: string; count: bigint };
 
 export async function GET(req: NextRequest) {
+  try {
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
   const parsed = parseSearchParams(searchParams, usageSessionsQuerySchema);
   if (!parsed.success) return parsed.error;
@@ -212,7 +226,7 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    const data = (rows ?? []).map((row) => ({
+    const data = (rows ?? []).map((row: any) => ({
       sessionId: row.sessionId,
       firstActivity: row.firstActivity instanceof Date ? row.firstActivity.toISOString() : row.firstActivity,
       lastActivity: row.lastActivity instanceof Date ? row.lastActivity.toISOString() : row.lastActivity,

@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+
+import { asAuthError } from "@/lib/auth/errors";
+import { requireSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { parseSearchParams, usageQuerySchema, type Dimension, type Granularity } from "@/lib/api";
@@ -7,6 +10,17 @@ const startOfUtcDay = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), d
 const bucketToNumber = (value: Date | string) => (value instanceof Date ? value.getTime() : new Date(value).getTime());
 
 export async function GET(req: NextRequest) {
+  try {
+    await requireSession();
+  } catch (err) {
+    const authError = asAuthError(err);
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: authError.status });
+    }
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   const { searchParams } = new URL(req.url);
 
   const parsed = parseSearchParams(searchParams, usageQuerySchema);

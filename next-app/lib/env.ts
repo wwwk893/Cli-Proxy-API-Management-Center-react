@@ -12,7 +12,23 @@ const serverSchema = z.object({
     .string()
     .url({ message: "CLIPROXY_MANAGEMENT_BASE must be a valid URL" })
     .default("http://localhost:3818/v0/management"),
-  CLIPROXY_MANAGEMENT_KEY: z.string().min(1, "CLIPROXY_MANAGEMENT_KEY is required"),
+  CLIPROXY_MANAGEMENT_KEY: z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  }, z.string().min(1, "CLIPROXY_MANAGEMENT_KEY is required").optional()),
+  AUTH_ENCRYPTION_KEY: z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  }, z.string().min(1, "AUTH_ENCRYPTION_KEY is required").optional()),
+  AUTH_SESSION_TTL_DAYS: z.coerce
+    .number({ message: "AUTH_SESSION_TTL_DAYS must be a number" })
+    .int()
+    .min(1)
+    .max(365)
+    .default(30),
+  AUTH_COOKIE_NAME: z.string().trim().min(1).default("cpa_session"),
   USAGE_INGEST_MAX_EVENTS_PER_RUN: z.coerce
     .number({ message: "USAGE_INGEST_MAX_EVENTS_PER_RUN must be a number" })
     .int()
