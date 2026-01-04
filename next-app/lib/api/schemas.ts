@@ -8,6 +8,18 @@ export const paginationSchema = z.object({
   offset: z.coerce.number().int().nonnegative().optional(),
 });
 
+// Dashboard overview API schemas
+export const dashboardTimeWindowSchema = z
+  .enum(["utc-today", "last-24h", "last-7d", "last-30d"])
+  .default("last-24h");
+
+export const dashboardChannelSchema = z.enum(["all", "cliproxy", "codex"]).default("all");
+
+export const dashboardOverviewQuerySchema = z.object({
+  timeWindow: dashboardTimeWindowSchema,
+  channel: dashboardChannelSchema,
+});
+
 // Usage API schemas
 export const granularitySchema = z.enum(["second", "minute", "hour", "day"]).default("day");
 export const viewModeSchema = z
@@ -172,6 +184,7 @@ export const usageIngestQuerySchema = z.object({
 });
 
 // Type exports
+export type DashboardOverviewQuery = z.infer<typeof dashboardOverviewQuerySchema>;
 export type UsageQuery = z.infer<typeof usageQuerySchema>;
 export type UsageByModelQuery = z.infer<typeof usageByModelQuerySchema>;
 export type UsageSessionsQuery = z.infer<typeof usageSessionsQuerySchema>;
