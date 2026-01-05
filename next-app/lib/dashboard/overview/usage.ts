@@ -2,7 +2,7 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { CODEX_API_PATHS } from "@/lib/usage/aggregation-constants";
+import { CLI_API_PATHS, CODEX_API_PATHS, OPENCODE_API_PATHS } from "@/lib/usage/aggregation-constants";
 import type { DashboardChannel, DashboardKpis, DashboardTrendBucket } from "./types";
 import type { DashboardResolvedRange } from "./range";
 
@@ -73,12 +73,14 @@ export async function queryOverviewUsage(
   const eventFrom = includeEvents ? (useDaily ? todayStart : fromDate) : undefined;
   const eventTo = includeEvents ? toDate : undefined;
 
-  const codexDailyFilter =
+  const dailyChannelFilter =
     channel === "codex"
       ? Prisma.sql`AND "apiPath" = ANY(${CODEX_API_PATHS}::text[])`
-      : channel === "cliproxy"
-        ? Prisma.sql`AND NOT ("apiPath" = ANY(${CODEX_API_PATHS}::text[]))`
-        : Prisma.sql``;
+      : channel === "opencode"
+        ? Prisma.sql`AND "apiPath" = ANY(${OPENCODE_API_PATHS}::text[])`
+        : channel === "cliproxy"
+          ? Prisma.sql`AND NOT ("apiPath" = ANY(${CLI_API_PATHS}::text[]))`
+          : Prisma.sql``;
 
   const channelEventFilter = toEventChannelFilter(channel);
 
@@ -105,7 +107,7 @@ export async function queryOverviewUsage(
           WHERE
             (${dailyFrom ?? null}::timestamptz IS NULL OR "date" >= ${dailyFrom ?? null}::timestamptz)
             AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
-            ${codexDailyFilter}
+            ${dailyChannelFilter}
         `
       : Promise.resolve([] as DailyKpiRow[]),
     includeEvents
@@ -159,7 +161,7 @@ export async function queryOverviewUsage(
           WHERE
             (${dailyFrom ?? null}::timestamptz IS NULL OR "date" >= ${dailyFrom ?? null}::timestamptz)
             AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
-            ${codexDailyFilter}
+            ${dailyChannelFilter}
           GROUP BY bucket
           ORDER BY bucket
         `

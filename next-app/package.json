@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:with-ingest": "concurrently --names \"dev,usage,codex\" --prefix-colors \"blue,green,yellow\" \"npm run dev\" \"npm run usage:ingest:loop\" \"npm run codex:ingest:loop\"",
+    "dev:with-ingest": "concurrently --names \"dev,usage,codex,opencode\" --prefix-colors \"blue,green,yellow,magenta\" \"npm run dev\" \"npm run usage:ingest:loop\" \"npm run codex:ingest:loop\" \"npm run opencode:ingest:loop\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -21,7 +21,9 @@
     "usage:ingest:loop": "npx tsx scripts/usage-ingest-loop.ts",
     "usage:aggregate": "npx tsx scripts/usage-aggregate.ts",
     "codex:ingest": "npx tsx scripts/codex-ingest.ts",
-    "codex:ingest:loop": "npx tsx scripts/codex-ingest-loop.ts"
+    "codex:ingest:loop": "npx tsx scripts/codex-ingest-loop.ts",
+    "opencode:ingest": "npx tsx scripts/opencode-ingest.ts",
+    "opencode:ingest:loop": "npx tsx scripts/opencode-ingest-loop.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

@@ -181,7 +181,12 @@ export function CreateJobDialog({ open, defaultFrom, defaultTo, error, onError, 
   }));
 
   const channelOptions: FilterOption[] = (meta?.channels ?? []).map((channel) => {
-    const labelKey = channel === "cliproxy" ? "cliproxyGateway" : "codexCli";
+    const labelKey =
+      channel === "cliproxy"
+        ? "cliproxyGateway"
+        : channel === "codex"
+          ? "codexCli"
+          : "opencodeCli";
     return {
       id: channel,
       label: t(labelKey),

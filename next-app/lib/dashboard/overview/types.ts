@@ -1,5 +1,5 @@
 export type DashboardTimeWindow = "utc-today" | "last-24h" | "last-7d" | "last-30d";
-export type DashboardChannel = "all" | "cliproxy" | "codex";
+export type DashboardChannel = "all" | "cliproxy" | "codex" | "opencode";
 
 export type DashboardOverviewRequest = {
   timeWindow: DashboardTimeWindow;

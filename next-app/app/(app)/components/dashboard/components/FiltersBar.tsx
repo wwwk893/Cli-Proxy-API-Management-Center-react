@@ -31,6 +31,8 @@ function channelLabel(t: (key: string) => string, value: DashboardChannel): stri
       return t("dashboard.filters.channel.cliproxy");
     case "codex":
       return t("dashboard.filters.channel.codex");
+    case "opencode":
+      return t("dashboard.filters.channel.opencode");
   }
 }
 

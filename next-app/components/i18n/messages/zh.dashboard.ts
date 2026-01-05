@@ -12,6 +12,7 @@ const messagesZhDashboard: Record<string, string> = {
   "dashboard.filters.channel.all": "全部",
   "dashboard.filters.channel.cliproxy": "Cliproxy",
   "dashboard.filters.channel.codex": "Codex",
+  "dashboard.filters.channel.opencode": "OpenCode",
   "dashboard.partialErrors.badge": "部分错误",
   "dashboard.partialErrors.title": "部分数据加载失败",
   "dashboard.partialErrors.subtitle": "部分模块可能缺失或数据不完整。",

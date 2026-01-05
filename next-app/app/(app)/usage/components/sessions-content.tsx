@@ -221,7 +221,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
   const from = dateRange?.from ? dateRange.from.toISOString() : undefined;
   const to = dateRange?.to ? dateRange.to.toISOString() : undefined;
 
-  const includeCodex = selectedChannels.includes("codex");
+  const includeCliSessions = selectedChannels.some((c) => c === "codex" || c === "opencode");
 
   const [q, setQ] = useState("");
   const [models, setModels] = useState<string[]>([]);
@@ -240,7 +240,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!includeCodex) return;
+    if (!includeCliSessions) return;
     const controller = new AbortController();
     const load = async () => {
       setLoading(true);
@@ -279,7 +279,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
     };
     load();
     return () => controller.abort();
-  }, [devices, efforts, from, includeCodex, models, offset, originators, q, selectedChannels, sortBy, sortDir, to]);
+  }, [devices, efforts, from, includeCliSessions, models, offset, originators, q, selectedChannels, sortBy, sortDir, to]);
 
   // 重置分页：当筛选或排序变化时回到第一页
   useEffect(() => {
@@ -304,6 +304,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
       const params = new URLSearchParams();
       if (from) params.set("from", from);
       if (to) params.set("to", to);
+      selectedChannels.forEach((c) => params.append("channels", c));
       const query = params.toString();
       try {
         const res = await fetch(`/api/usage/sessions/${encodeURIComponent(activeSessionId)}/events${query ? `?${query}` : ""}`, { signal: controller.signal });
@@ -320,7 +321,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
     };
     load();
     return () => controller.abort();
-  }, [activeSessionId, drawerOpen, from, to]);
+  }, [activeSessionId, drawerOpen, from, selectedChannels, to]);
 
   const openDrawer = (sessionId: string) => {
     setActiveSessionId(sessionId);
@@ -336,7 +337,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
     setSortDir((prev) => (prev === "desc" ? "asc" : "desc"));
   };
 
-  if (!includeCodex) {
+  if (!includeCliSessions) {
     return (
       <Card className="border border-border bg-card text-card-foreground shadow-lg">
         <CardHeader>
@@ -347,7 +348,7 @@ export function SessionsContent({ onChangeTab }: { onChangeTab: (tab: "overview"
           <div className="flex flex-wrap items-center gap-2">
             <Button
               onClick={() => {
-                setSelectedChannels(["cliproxy", "codex"]);
+                setSelectedChannels(["cliproxy", "codex", "opencode"]);
                 onChangeTab("sessions");
               }}
             >

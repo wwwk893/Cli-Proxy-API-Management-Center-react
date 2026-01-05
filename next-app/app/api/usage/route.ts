@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { parseSearchParams, usageQuerySchema, type Dimension, type Granularity } from "@/lib/api";
+import { CLI_API_PATHS, CODEX_API_PATHS, OPENCODE_API_PATHS } from "@/lib/usage/aggregation-constants";
 
 const startOfUtcDay = (date: Date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
 const bucketToNumber = (value: Date | string) => (value instanceof Date ? value.getTime() : new Date(value).getTime());
@@ -35,14 +36,17 @@ export async function GET(req: NextRequest) {
     apiPath,
     granularity = "day",
     view,
-    channels = ["cliproxy", "codex"],
+    channels = ["cliproxy", "codex", "opencode"],
     sources = [],
     groupBySource = false,
     dimension,
   } = parsed.data;
 
-  const codexApiPaths = ["codex-cli", "codex"];
+  const codexApiPaths = [...CODEX_API_PATHS];
+  const opencodeApiPaths = [...OPENCODE_API_PATHS];
+  const cliApiPaths = [...CLI_API_PATHS];
   const includeCodex = channels.includes("codex");
+  const includeOpencode = channels.includes("opencode");
   const includeCliproxy = channels.includes("cliproxy");
 
   const fromDate = from ? new Date(from) : undefined;
@@ -93,15 +97,28 @@ export async function GET(req: NextRequest) {
     ? Prisma.sql`AND "authSource" = ANY(${sources}::text[])`
     : Prisma.sql``;
 
-  const codexDailyFilter =
-    includeCodex && !includeCliproxy
-      ? Prisma.sql`AND "apiPath" = ANY(${codexApiPaths}::text[])`
-      : !includeCodex && includeCliproxy
-        ? Prisma.sql`AND NOT ("apiPath" = ANY(${codexApiPaths}::text[]))`
-        : Prisma.sql``;
+  const dailyChannelFilter = (() => {
+    if (channels.length >= 3) return Prisma.sql``;
+    const selectedCliApiPaths = Array.from(
+      new Set([
+        ...(includeCodex ? codexApiPaths : []),
+        ...(includeOpencode ? opencodeApiPaths : []),
+      ]),
+    );
+    if (includeCliproxy) {
+      if (!selectedCliApiPaths.length) {
+        return Prisma.sql`AND NOT ("apiPath" = ANY(${cliApiPaths}::text[]))`;
+      }
+      return Prisma.sql`AND ("apiPath" = ANY(${selectedCliApiPaths}::text[]) OR NOT ("apiPath" = ANY(${cliApiPaths}::text[])))`;
+    }
+    if (selectedCliApiPaths.length) {
+      return Prisma.sql`AND "apiPath" = ANY(${selectedCliApiPaths}::text[])`;
+    }
+    return Prisma.sql`AND FALSE`;
+  })();
 
   const channelEventFilter =
-    includeCodex !== includeCliproxy
+    channels.length < 3
       ? Prisma.sql`AND "sourceType" = ANY(${channels}::text[])`
       : Prisma.sql``;
 
@@ -137,7 +154,7 @@ export async function GET(req: NextRequest) {
 	              AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
 	              ${modelFilter}
 	              ${sourceFilter}
-	              ${codexDailyFilter}
+	              ${dailyChannelFilter}
 	              AND (${apiPath ?? null}::text IS NULL OR "apiPath" = ${apiPath ?? null})
 	            GROUP BY bucket, "model"
 	            ORDER BY bucket, "model"
@@ -232,6 +249,7 @@ export async function GET(req: NextRequest) {
               ${finalDimension === "model+channel" ? Prisma.sql`"model"` : Prisma.sql`NULL`} AS "model",
               CASE
                 WHEN "apiPath" = ANY(${codexApiPaths}::text[]) THEN 'codex'
+                WHEN "apiPath" = ANY(${opencodeApiPaths}::text[]) THEN 'opencode'
                 ELSE 'cliproxy'
               END AS "channel",
               SUM("inputTokens") AS "inputTokens",
@@ -247,7 +265,7 @@ export async function GET(req: NextRequest) {
               AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
               ${modelFilter}
               ${sourceFilter}
-              ${codexDailyFilter}
+              ${dailyChannelFilter}
               AND (${apiPath ?? null}::text IS NULL OR "apiPath" = ${apiPath ?? null})
             GROUP BY bucket, "model", "channel"
             ORDER BY bucket, "model", "channel"
@@ -371,7 +389,7 @@ export async function GET(req: NextRequest) {
 	              AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
 	              ${modelFilter}
 	              ${sourceFilter}
-	              ${codexDailyFilter}
+	              ${dailyChannelFilter}
 	              AND (${apiPath ?? null}::text IS NULL OR "apiPath" = ${apiPath ?? null})
 	            GROUP BY bucket, "model", "authSource"
 	            ORDER BY bucket, "model", "authSource"
@@ -516,7 +534,7 @@ export async function GET(req: NextRequest) {
 	            AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
 	            ${modelFilter}
 	            ${sourceFilter}
-	            ${codexDailyFilter}
+	            ${dailyChannelFilter}
 	            AND (${apiPath ?? null}::text IS NULL OR "apiPath" = ${apiPath ?? null})
 	          GROUP BY bucket, "model"
 	          ORDER BY bucket, "model"

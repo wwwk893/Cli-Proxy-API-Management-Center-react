@@ -1,6 +1,6 @@
 export type JobStatus = "pending" | "running" | "completed" | "failed";
 
-export type AggregationChannel = "cliproxy" | "codex";
+export type AggregationChannel = "cliproxy" | "codex" | "opencode";
 
 export type AggregationFilters = {
   models?: string[];

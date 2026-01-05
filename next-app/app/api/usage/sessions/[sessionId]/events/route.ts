@@ -25,8 +25,13 @@ export async function GET(
   const parsed = parseSearchParams(searchParams, usageSessionEventsQuerySchema);
   if (!parsed.success) return parsed.error;
 
-  const { from, to, limit, offset } = parsed.data;
+  const { from, to, channels = ["cliproxy", "codex", "opencode"], limit, offset } = parsed.data;
   const { sessionId } = await context.params;
+
+  const cliChannels = channels.filter((c) => c === "codex" || c === "opencode");
+  if (!cliChannels.length) {
+    return NextResponse.json({ error: "No session data for current channels" }, { status: 404 });
+  }
 
   try {
     const metaRows = await prisma.$queryRaw<
@@ -70,7 +75,7 @@ export async function GET(
         SUM("costUsd") AS "costUsd"
       FROM "UsageEvent"
       WHERE
-        "sourceType" = 'codex'
+        "sourceType" = ANY(${cliChannels}::text[])
         AND "sessionId" = ${sessionId}
         AND (${from ?? null}::timestamptz IS NULL OR "eventTime" >= ${from ?? null}::timestamptz)
         AND (${to ?? null}::timestamptz IS NULL OR "eventTime" <= ${to ?? null}::timestamptz)
@@ -114,7 +119,7 @@ export async function GET(
         "rawKey" AS "rawKey"
       FROM "UsageEvent"
       WHERE
-        "sourceType" = 'codex'
+        "sourceType" = ANY(${cliChannels}::text[])
         AND "sessionId" = ${sessionId}
         AND (${from ?? null}::timestamptz IS NULL OR "eventTime" >= ${from ?? null}::timestamptz)
         AND (${to ?? null}::timestamptz IS NULL OR "eventTime" <= ${to ?? null}::timestamptz)

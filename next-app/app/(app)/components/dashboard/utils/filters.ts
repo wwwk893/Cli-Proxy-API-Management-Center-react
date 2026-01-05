@@ -6,7 +6,7 @@ export type DashboardFilters = {
 };
 
 export const DASHBOARD_TIME_WINDOWS: DashboardTimeWindow[] = ["utc-today", "last-24h", "last-7d", "last-30d"];
-export const DASHBOARD_CHANNELS: DashboardChannel[] = ["all", "cliproxy", "codex"];
+export const DASHBOARD_CHANNELS: DashboardChannel[] = ["all", "cliproxy", "codex", "opencode"];
 
 export function isDashboardTimeWindow(value: string | null): value is DashboardTimeWindow {
   return !!value && (DASHBOARD_TIME_WINDOWS as readonly string[]).includes(value);

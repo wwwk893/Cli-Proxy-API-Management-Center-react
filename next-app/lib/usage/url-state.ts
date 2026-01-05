@@ -58,7 +58,7 @@ export function readUsageSearchParams(params: URLSearchParams): UsageQueryState 
 
   const selectedSources = params.getAll("sources").map((s) => s.trim()).filter(Boolean);
   const selectedChannelsRaw = params.getAll("channels").map((c) => c.trim()).filter(Boolean);
-  const selectedChannels = selectedChannelsRaw.length ? selectedChannelsRaw : ["cliproxy", "codex"];
+  const selectedChannels = selectedChannelsRaw.length ? selectedChannelsRaw : ["cliproxy", "codex", "opencode"];
 
   const fromStr = params.get("from");
   const toStr = params.get("to");

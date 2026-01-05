@@ -5,6 +5,7 @@ import { requireSession } from "@/lib/auth/session";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseSearchParams, usageByModelQuerySchema } from "@/lib/api";
+import { CLI_API_PATHS, CODEX_API_PATHS, OPENCODE_API_PATHS } from "@/lib/usage/aggregation-constants";
 
 const startOfUtcDay = (date: Date) =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
@@ -25,21 +26,37 @@ export async function GET(req: NextRequest) {
   const parsed = parseSearchParams(searchParams, usageByModelQuerySchema);
   if (!parsed.success) return parsed.error;
 
-  const { from, to, apiPath, channels = ["cliproxy", "codex"], sources = [] } = parsed.data;
+  const { from, to, apiPath, channels = ["cliproxy", "codex", "opencode"], sources = [] } = parsed.data;
 
-  const codexApiPaths = ["codex-cli", "codex"];
+  const codexApiPaths = [...CODEX_API_PATHS];
+  const opencodeApiPaths = [...OPENCODE_API_PATHS];
+  const cliApiPaths = [...CLI_API_PATHS];
   const includeCodex = channels.includes("codex");
+  const includeOpencode = channels.includes("opencode");
   const includeCliproxy = channels.includes("cliproxy");
 
-  const codexDailyFilter =
-    includeCodex && !includeCliproxy
-      ? Prisma.sql`AND "apiPath" = ANY(${codexApiPaths}::text[])`
-      : !includeCodex && includeCliproxy
-        ? Prisma.sql`AND NOT ("apiPath" = ANY(${codexApiPaths}::text[]))`
-        : Prisma.sql``;
+  const dailyChannelFilter = (() => {
+    if (channels.length >= 3) return Prisma.sql``;
+    const selectedCliApiPaths = Array.from(
+      new Set([
+        ...(includeCodex ? codexApiPaths : []),
+        ...(includeOpencode ? opencodeApiPaths : []),
+      ]),
+    );
+    if (includeCliproxy) {
+      if (!selectedCliApiPaths.length) {
+        return Prisma.sql`AND NOT ("apiPath" = ANY(${cliApiPaths}::text[]))`;
+      }
+      return Prisma.sql`AND ("apiPath" = ANY(${selectedCliApiPaths}::text[]) OR NOT ("apiPath" = ANY(${cliApiPaths}::text[])))`;
+    }
+    if (selectedCliApiPaths.length) {
+      return Prisma.sql`AND "apiPath" = ANY(${selectedCliApiPaths}::text[])`;
+    }
+    return Prisma.sql`AND FALSE`;
+  })();
 
   const channelEventFilter =
-    includeCodex !== includeCliproxy ? Prisma.sql`AND "sourceType" = ANY(${channels}::text[])` : Prisma.sql``;
+    channels.length < 3 ? Prisma.sql`AND "sourceType" = ANY(${channels}::text[])` : Prisma.sql``;
 
   const sourceFilter = sources.length
     ? Prisma.sql`AND "authSource" = ANY(${sources}::text[])`
@@ -80,7 +97,7 @@ export async function GET(req: NextRequest) {
               (${dailyFrom ?? null}::timestamptz IS NULL OR "date" >= ${dailyFrom ?? null}::timestamptz)
               AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
               AND (${apiPath ?? null}::text IS NULL OR "apiPath" = ${apiPath ?? null})
-              ${codexDailyFilter}
+              ${dailyChannelFilter}
               ${sourceFilter}
             GROUP BY "authSource"
             ORDER BY "authSource"

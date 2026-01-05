@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   const {
     from,
     to,
-    channels = ["cliproxy", "codex"],
+    channels = ["cliproxy", "codex", "opencode"],
     model: models = [],
     originator = [],
     deviceId = [],
@@ -41,7 +41,8 @@ export async function GET(req: NextRequest) {
     includeFacets = false,
   } = parsed.data;
 
-  if (!channels.includes("codex")) {
+  const cliChannels = channels.filter((c) => c === "codex" || c === "opencode");
+  if (!cliChannels.length) {
     return NextResponse.json({
       data: [],
       page: { limit, offset, total: 0 },
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
 
   const baseWhere = Prisma.sql`
     WHERE
-      "sourceType" = 'codex'
+      "sourceType" = ANY(${cliChannels}::text[])
       AND "sessionId" IS NOT NULL
       AND (${from ?? null}::timestamptz IS NULL OR "eventTime" >= ${from ?? null}::timestamptz)
       AND (${to ?? null}::timestamptz IS NULL OR "eventTime" <= ${to ?? null}::timestamptz)
@@ -257,4 +258,3 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

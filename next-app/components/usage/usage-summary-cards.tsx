@@ -68,10 +68,10 @@ export function UsageSummaryCards() {
     };
   }, [beginRefresh, endRefresh, searchParams]);
 
-  const includeBothChannels = selectedChannels.length === 2 && selectedChannels.includes("cliproxy") && selectedChannels.includes("codex");
+  const includeChannelBreakdown = selectedChannels.length >= 2;
 
   useEffect(() => {
-    if (!includeBothChannels) {
+    if (!includeChannelBreakdown) {
       setChannelData(null);
       return;
     }
@@ -105,7 +105,7 @@ export function UsageSummaryCards() {
       controller.abort();
       if (!completed) endRefresh();
     };
-  }, [beginRefresh, endRefresh, includeBothChannels, searchParams]);
+  }, [beginRefresh, endRefresh, includeChannelBreakdown, searchParams]);
 
   const { totalTokens, cachedTokens, costUsd, cacheRatio, failureCount, successCount } = useMemo(() => {
     if (!data) return { totalTokens: 0, cachedTokens: 0, costUsd: 0, cacheRatio: 0, failureCount: 0, successCount: 0 };
@@ -128,12 +128,16 @@ export function UsageSummaryCards() {
 
   const channelTotals = useMemo(() => {
     if (!channelData || !channelData.length) return null;
-    const totals = {
+    const totals: Record<
+      "codex" | "opencode" | "cliproxy",
+      { totalTokens: number; cachedTokens: number; costUsd: number; requestCount: number }
+    > = {
       codex: { totalTokens: 0, cachedTokens: 0, costUsd: 0, requestCount: 0 },
+      opencode: { totalTokens: 0, cachedTokens: 0, costUsd: 0, requestCount: 0 },
       cliproxy: { totalTokens: 0, cachedTokens: 0, costUsd: 0, requestCount: 0 },
     };
     channelData.forEach((row) => {
-      const key = (row.channel ?? "cliproxy") as "codex" | "cliproxy";
+      const key = (row.channel ?? "cliproxy") as keyof typeof totals;
       if (!totals[key]) return;
       totals[key].totalTokens += Number(row.totalTokens ?? 0);
       totals[key].cachedTokens += Number(row.cachedTokens ?? 0);
@@ -150,17 +154,36 @@ export function UsageSummaryCards() {
 
   const breakdownLine = useMemo(() => {
     if (!channelTotals) return null;
-    const totalTok = channelTotals.codex.totalTokens + channelTotals.cliproxy.totalTokens;
-    const totalCached = channelTotals.codex.cachedTokens + channelTotals.cliproxy.cachedTokens;
-    const totalCost = channelTotals.codex.costUsd + channelTotals.cliproxy.costUsd;
-    const totalReq = channelTotals.codex.requestCount + channelTotals.cliproxy.requestCount;
-    return {
-      totalTokens: `${t("codexCli")} ${formatPct(channelTotals.codex.totalTokens, totalTok)}% · ${t("cliproxyGateway")} ${formatPct(channelTotals.cliproxy.totalTokens, totalTok)}%`,
-      cachedTokens: `${t("codexCli")} ${formatPct(channelTotals.codex.cachedTokens, totalCached)}% · ${t("cliproxyGateway")} ${formatPct(channelTotals.cliproxy.cachedTokens, totalCached)}%`,
-      costUsd: `${t("codexCli")} ${formatPct(channelTotals.codex.costUsd, totalCost)}% · ${t("cliproxyGateway")} ${formatPct(channelTotals.cliproxy.costUsd, totalCost)}%`,
-      requests: `${t("codexCli")} ${formatPct(channelTotals.codex.requestCount, totalReq)}% · ${t("cliproxyGateway")} ${formatPct(channelTotals.cliproxy.requestCount, totalReq)}%`,
+    const channelOrder: Array<keyof typeof channelTotals> = ["codex", "opencode", "cliproxy"];
+    const includedChannels = channelOrder.filter((k) => selectedChannels.includes(k));
+    if (includedChannels.length < 2) return null;
+    const getLabel = (key: keyof typeof channelTotals) => {
+      switch (key) {
+        case "codex":
+          return t("codexCli");
+        case "opencode":
+          return t("opencodeCli");
+        case "cliproxy":
+          return t("cliproxyGateway");
+      }
     };
-  }, [channelTotals, t]);
+
+    const totalTok = includedChannels.reduce((acc, k) => acc + channelTotals[k].totalTokens, 0);
+    const totalCached = includedChannels.reduce((acc, k) => acc + channelTotals[k].cachedTokens, 0);
+    const totalCost = includedChannels.reduce((acc, k) => acc + channelTotals[k].costUsd, 0);
+    const totalReq = includedChannels.reduce((acc, k) => acc + channelTotals[k].requestCount, 0);
+
+    const joinPct = (value: keyof (typeof channelTotals)["codex"]) =>
+      includedChannels
+        .map((k) => `${getLabel(k)} ${formatPct(channelTotals[k][value], value === "costUsd" ? totalCost : value === "requestCount" ? totalReq : value === "cachedTokens" ? totalCached : totalTok)}%`)
+        .join(" · ");
+    return {
+      totalTokens: joinPct("totalTokens"),
+      cachedTokens: joinPct("cachedTokens"),
+      costUsd: joinPct("costUsd"),
+      requests: joinPct("requestCount"),
+    };
+  }, [channelTotals, selectedChannels, t]);
 
   if (!data) {
     return (

@@ -1,13 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { CODEX_API_PATHS } from "@/lib/usage/aggregation-constants";
 import { buildFiltersHash, buildUsageEventWhere, normalizeAggregationFilters } from "@/lib/usage/aggregation-filters";
 
 describe("Aggregation filters", () => {
   it("normalizes models and removes full channel selection", () => {
     const result = normalizeAggregationFilters({
       models: [" gpt-4 ", "gpt-3.5", "gpt-4"],
-      channels: ["codex", "cliproxy"],
+      channels: ["codex", "cliproxy", "opencode"],
     });
 
     expect(result).toEqual({ models: ["gpt-3.5", "gpt-4"] });
@@ -29,13 +28,17 @@ describe("Aggregation filters", () => {
     expect(first).toBe(second);
   });
 
-  it("builds UsageEvent where clause for codex and cliproxy", () => {
+  it("builds UsageEvent where clause for channels", () => {
     expect(buildUsageEventWhere({ channels: ["codex"] })).toEqual({
-      apiPath: { in: [...CODEX_API_PATHS] },
+      sourceType: "codex",
     });
 
     expect(buildUsageEventWhere({ channels: ["cliproxy"] })).toEqual({
-      NOT: { apiPath: { in: [...CODEX_API_PATHS] } },
+      sourceType: "cliproxy",
+    });
+
+    expect(buildUsageEventWhere({ channels: ["opencode"] })).toEqual({
+      sourceType: "opencode",
     });
   });
 });

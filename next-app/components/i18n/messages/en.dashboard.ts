@@ -12,6 +12,7 @@ const messagesEnDashboard: Record<string, string> = {
   "dashboard.filters.channel.all": "All",
   "dashboard.filters.channel.cliproxy": "Cliproxy",
   "dashboard.filters.channel.codex": "Codex",
+  "dashboard.filters.channel.opencode": "OpenCode",
   "dashboard.partialErrors.badge": "Partial errors",
   "dashboard.partialErrors.title": "Some data failed to load",
   "dashboard.partialErrors.subtitle": "Some modules may be missing or incomplete.",

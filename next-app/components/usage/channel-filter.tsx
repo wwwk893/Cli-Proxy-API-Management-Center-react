@@ -20,6 +20,7 @@ import { formatChannelLabel, getChannelColor, getChannelIcon } from "@/lib/chann
 const CHANNEL_OPTIONS = [
   { id: "cliproxy", labelKey: "cliproxyGateway" },
   { id: "codex", labelKey: "codexCli" },
+  { id: "opencode", labelKey: "opencodeCli" },
 ] as const;
 
 export function ChannelFilter() {
@@ -132,4 +133,3 @@ export function ChannelFilter() {
     </Popover>
   );
 }
-

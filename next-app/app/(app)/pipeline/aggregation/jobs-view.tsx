@@ -76,6 +76,7 @@ export default function JobsView({ initialData }: Props) {
     () => ({
       cliproxy: t("cliproxyGateway"),
       codex: t("codexCli"),
+      opencode: t("opencodeCli"),
     }),
     [t],
   );

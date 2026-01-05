@@ -3,7 +3,7 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 
 import { fetchManagementJsonWithConfig, fetchManagementRawWithConfig, toManagementError, type ManagementConfig } from "@/lib/management/client";
-import { CODEX_API_PATHS } from "@/lib/usage/aggregation-constants";
+import { CLI_API_PATHS, CODEX_API_PATHS, OPENCODE_API_PATHS } from "@/lib/usage/aggregation-constants";
 import type { DashboardChannel, DashboardConfigHealth, DashboardPartialError, DashboardSystemHealth } from "./types";
 import type { DashboardResolvedRange } from "./range";
 import { Prisma } from "@prisma/client";
@@ -162,12 +162,14 @@ async function computePricingCoverage(params: {
   const eventFrom = includeEvents ? (useDaily ? todayStart : fromDate) : undefined;
   const eventTo = includeEvents ? toDate : undefined;
 
-  const codexDailyFilter =
+  const dailyChannelFilter =
     channel === "codex"
       ? Prisma.sql`AND "apiPath" = ANY(${CODEX_API_PATHS}::text[])`
-      : channel === "cliproxy"
-        ? Prisma.sql`AND NOT ("apiPath" = ANY(${CODEX_API_PATHS}::text[]))`
-        : Prisma.sql``;
+      : channel === "opencode"
+        ? Prisma.sql`AND "apiPath" = ANY(${OPENCODE_API_PATHS}::text[])`
+        : channel === "cliproxy"
+          ? Prisma.sql`AND NOT ("apiPath" = ANY(${CLI_API_PATHS}::text[]))`
+          : Prisma.sql``;
 
   const channelEventFilter = toEventChannelFilter(channel);
 
@@ -181,9 +183,11 @@ async function computePricingCoverage(params: {
             },
             ...(channel === "codex"
               ? { apiPath: { in: [...CODEX_API_PATHS] } }
-              : channel === "cliproxy"
-                ? { apiPath: { notIn: [...CODEX_API_PATHS] } }
-                : {}),
+              : channel === "opencode"
+                ? { apiPath: { in: [...OPENCODE_API_PATHS] } }
+                : channel === "cliproxy"
+                  ? { apiPath: { notIn: [...CLI_API_PATHS] } }
+                  : {}),
           },
           distinct: ["model"],
           select: { model: true },
@@ -236,7 +240,7 @@ async function computePricingCoverage(params: {
       WHERE
         (${dailyFrom ?? null}::timestamptz IS NULL OR "date" >= ${dailyFrom ?? null}::timestamptz)
         AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
-        ${codexDailyFilter}
+            ${dailyChannelFilter}
     `);
   }
 

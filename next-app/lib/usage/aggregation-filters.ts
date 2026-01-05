@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 
-import { AGGREGATION_CHANNELS, CODEX_API_PATHS, AggregationChannel } from "./aggregation-constants";
+import { AGGREGATION_CHANNELS, AggregationChannel } from "./aggregation-constants";
 
 export type AggregationFilters = {
   models?: string[];
@@ -58,12 +58,9 @@ export const buildUsageEventWhere = (filters?: AggregationFilters): Prisma.Usage
     where.model = { in: normalized.models };
   }
   if (normalized?.channels?.length === 1) {
-    const channel = normalized.channels[0];
-    if (channel === "codex") {
-      where.apiPath = { in: [...CODEX_API_PATHS] };
-    } else {
-      where.NOT = { apiPath: { in: [...CODEX_API_PATHS] } };
-    }
+    where.sourceType = normalized.channels[0];
+  } else if (normalized?.channels?.length) {
+    where.sourceType = { in: normalized.channels };
   }
   return where;
 };
@@ -73,20 +70,15 @@ export const buildUsageEventFilterSql = (filters?: AggregationFilters, tableAlia
   if (!normalized) return Prisma.sql``;
 
   const modelColumn = Prisma.raw(tableAlias ? `${tableAlias}."model"` : `"model"`);
-  const apiPathColumn = Prisma.raw(tableAlias ? `${tableAlias}."apiPath"` : `"apiPath"`);
+  const sourceTypeColumn = Prisma.raw(tableAlias ? `${tableAlias}."sourceType"` : `"sourceType"`);
   const conditions: Prisma.Sql[] = [];
 
   if (normalized.models?.length) {
     conditions.push(Prisma.sql`${modelColumn} = ANY(${normalized.models}::text[])`);
   }
 
-  if (normalized.channels?.length === 1) {
-    const channel = normalized.channels[0];
-    if (channel === "codex") {
-      conditions.push(Prisma.sql`${apiPathColumn} = ANY(${CODEX_API_PATHS}::text[])`);
-    } else {
-      conditions.push(Prisma.sql`NOT (${apiPathColumn} = ANY(${CODEX_API_PATHS}::text[]))`);
-    }
+  if (normalized.channels?.length) {
+    conditions.push(Prisma.sql`${sourceTypeColumn} = ANY(${normalized.channels}::text[])`);
   }
 
   if (!conditions.length) return Prisma.sql``;

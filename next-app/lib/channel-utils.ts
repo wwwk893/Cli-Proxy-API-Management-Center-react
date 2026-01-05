@@ -6,11 +6,13 @@ import type { LucideIcon } from "lucide-react";
 const CHANNEL_COLORS: Record<string, string> = {
   cliproxy: "#0ea5e9", // sky-500
   codex: "#22c55e", // green-500
+  opencode: "#a855f7", // purple-500
 };
 
 const CHANNEL_ICONS: Record<string, LucideIcon> = {
   cliproxy: Globe,
   codex: Terminal,
+  opencode: Terminal,
 };
 
 export function getChannelColor(channel?: string | null): string {
@@ -28,6 +30,6 @@ export function formatChannelLabel(channel?: string | null) {
   const normalized = channel.toLowerCase();
   if (normalized === "cliproxy") return "Cliproxy Gateway";
   if (normalized === "codex") return "Codex CLI";
+  if (normalized === "opencode") return "OpenCode CLI";
   return channel;
 }
-

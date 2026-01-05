@@ -13,7 +13,7 @@ export const dashboardTimeWindowSchema = z
   .enum(["utc-today", "last-24h", "last-7d", "last-30d"])
   .default("last-24h");
 
-export const dashboardChannelSchema = z.enum(["all", "cliproxy", "codex"]).default("all");
+export const dashboardChannelSchema = z.enum(["all", "cliproxy", "codex", "opencode"]).default("all");
 
 export const dashboardOverviewQuerySchema = z.object({
   timeWindow: dashboardTimeWindowSchema,
@@ -37,15 +37,15 @@ const stringOrStringArray = z
     return Array.isArray(val) ? val : [val];
   });
 
-const channelValueSchema = z.enum(["cliproxy", "codex"]);
+const channelValueSchema = z.enum(["cliproxy", "codex", "opencode"]);
 const channelOrChannelArray = z
   .union([channelValueSchema, z.array(channelValueSchema)])
   .optional()
   .transform((val) => {
-    if (!val) return ["cliproxy", "codex"];
+    if (!val) return ["cliproxy", "codex", "opencode"];
     const arr = Array.isArray(val) ? val : [val];
     const unique = Array.from(new Set(arr));
-    return unique.length ? unique : ["cliproxy", "codex"];
+    return unique.length ? unique : ["cliproxy", "codex", "opencode"];
   });
 
 const aggregationFiltersSchema = z
@@ -157,6 +157,7 @@ export const usageSessionsQuerySchema = z.object({
 export const usageSessionEventsQuerySchema = z.object({
   from: isoDateStringSchema,
   to: isoDateStringSchema,
+  channels: channelOrChannelArray,
   limit: z.coerce.number().int().positive().max(1000).optional(),
   offset: z.coerce.number().int().nonnegative().optional(),
 });
