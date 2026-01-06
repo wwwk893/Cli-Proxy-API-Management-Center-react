@@ -1,0 +1,9 @@
+# plan/ 目录下的生成物（Mode A 默认不入库）
+bundle-*/
+zen-*-batch-*.zip
+zen-batch-*.zip
+evidence/*.zip
+
+# macOS
+.DS_Store
+__MACOSX/

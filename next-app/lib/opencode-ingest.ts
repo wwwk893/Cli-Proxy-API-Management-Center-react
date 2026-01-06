@@ -5,12 +5,15 @@ import os from "node:os";
 import { prisma } from "./db";
 import { calcCostUsd } from "./pricing";
 import { loadPricingMap } from "./pricing-map";
+import { normalizeModel } from "./usage/model-normalize";
 
 type UsageEventInput = {
   rawKey: string;
   eventTime: Date;
   apiPath: string;
   model: string;
+  modelRaw?: string | null;
+  modelCanonical?: string | null;
   proxyHost: string;
   status?: string | null;
   inputTokens: number;
@@ -197,12 +200,15 @@ function parseMessageToUsageEvent(params: {
 
   const hasError = Boolean(message.error);
   const status = hasError ? "error" : "completed";
+  const normalized = normalizeModel({ model });
 
   return {
     rawKey: `opencode:${sessionId}:${messageId}`,
     eventTime,
     apiPath: "opencode-cli",
     model,
+    modelRaw: normalized.modelRaw,
+    modelCanonical: normalized.modelCanonical,
     proxyHost,
     status,
     inputTokens,
@@ -219,7 +225,7 @@ function parseMessageToUsageEvent(params: {
     cwd,
     originator: asString(message.agent),
     cliVersion: null,
-    effort: null,
+    effort: normalized.effort,
   };
 }
 
@@ -323,6 +329,8 @@ export async function ingestUsageFromOpencode(options: OpencodeIngestOptions = {
               eventTime: e.eventTime,
               apiPath: e.apiPath,
               model: e.model,
+              modelRaw: e.modelRaw,
+              modelCanonical: e.modelCanonical,
               proxyHost: e.proxyHost,
               status: e.status,
               inputTokens: e.inputTokens,
@@ -374,4 +382,3 @@ export async function ingestUsageFromOpencode(options: OpencodeIngestOptions = {
     filesParsed,
   };
 }
-

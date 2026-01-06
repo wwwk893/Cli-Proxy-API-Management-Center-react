@@ -1,5 +1,6 @@
 import type { DateRange } from "react-day-picker";
 import type { Granularity, ViewMode } from "@/components/charts/usage/types";
+import { USAGE_MODEL_GROUP_BY, type EffortFilterValue, type UsageModelGroupBy } from "@/lib/usage/model-normalize";
 import { computePresetRange, parsePreset, presetRanges, type PresetKey } from "./presets";
 
 export type UsageQueryState = {
@@ -7,6 +8,8 @@ export type UsageQueryState = {
   activePreset: PresetKey | null;
   granularity: Granularity;
   viewMode: ViewMode;
+  modelGroupBy: UsageModelGroupBy;
+  selectedEfforts: EffortFilterValue[];
   selectedModels: string[];
   selectedChannels: string[];
   selectedSources: string[];
@@ -56,6 +59,23 @@ export function readUsageSearchParams(params: URLSearchParams): UsageQueryState 
           : "aggregate";
   const activePreset = parsePreset(params.get("preset"));
 
+  const rawGroupBy = params.get("groupBy")?.toLowerCase();
+  const modelGroupBy: UsageModelGroupBy = (USAGE_MODEL_GROUP_BY as readonly string[]).includes(rawGroupBy ?? "")
+    ? (rawGroupBy as UsageModelGroupBy)
+    : "canonical";
+
+  const effortsMulti = params.getAll("efforts");
+  const effortsSingle = params.get("efforts");
+  const effortsRaw = effortsMulti.length ? effortsMulti : effortsSingle ? [effortsSingle] : [];
+  const selectedEfforts = Array.from(
+    new Set(
+      effortsRaw
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ).filter((v): v is EffortFilterValue => v === "unspecified" || ["low", "medium", "high", "xhigh"].includes(v));
+
   const selectedSources = params.getAll("sources").map((s) => s.trim()).filter(Boolean);
   const selectedChannelsRaw = params.getAll("channels").map((c) => c.trim()).filter(Boolean);
   const selectedChannels = selectedChannelsRaw.length ? selectedChannelsRaw : ["cliproxy", "codex", "opencode"];
@@ -74,6 +94,8 @@ export function readUsageSearchParams(params: URLSearchParams): UsageQueryState 
     activePreset,
     granularity,
     viewMode,
+    modelGroupBy,
+    selectedEfforts,
     selectedModels,
     selectedChannels,
     selectedSources,
@@ -103,6 +125,17 @@ export function buildSearchParams(base: URLSearchParams, next: Partial<UsageQuer
 
   if (next.granularity) params.set("granularity", next.granularity);
   if (next.viewMode) params.set("view", next.viewMode);
+
+  if ("modelGroupBy" in next) {
+    if (next.modelGroupBy && next.modelGroupBy !== "canonical") params.set("groupBy", next.modelGroupBy);
+    else params.delete("groupBy");
+  }
+
+  if ("selectedEfforts" in next) {
+    params.delete("efforts");
+    const values = Array.isArray(next.selectedEfforts) ? next.selectedEfforts : [];
+    values.forEach((effort) => params.append("efforts", effort));
+  }
 
   if (next.selectedModels) {
     params.delete("model");

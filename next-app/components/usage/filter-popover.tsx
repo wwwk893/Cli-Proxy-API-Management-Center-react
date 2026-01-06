@@ -14,6 +14,7 @@ import { Filter, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/i18n-context";
 import { resolveModelColor } from "@/lib/model-colors";
+import { normalizeModel } from "@/lib/usage/model-normalize";
 
 export type ModelOption = {
   id: string;
@@ -37,15 +38,35 @@ export function FilterPopover({ selectedModels, models, loading, error, onRetry,
 
   const hasSelection = selectedModels.length > 0;
 
+  const canonicalEffortMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    models.forEach((m) => {
+      const normalized = normalizeModel({ model: m.id });
+      if (!normalized.effort) return;
+      const set = map.get(normalized.modelCanonical) ?? new Set<string>();
+      set.add(normalized.effort);
+      map.set(normalized.modelCanonical, set);
+    });
+    return map;
+  }, [models]);
+
   const filteredModels = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return models;
+    const effortTerm = (["low", "medium", "high", "xhigh"] as const).find((level) => term.includes(level));
     return models.filter((m) => {
       const idMatch = m.id.toLowerCase().includes(term);
       const descMatch = m.description?.toLowerCase().includes(term);
-      return idMatch || !!descMatch;
+      if (idMatch || !!descMatch) return true;
+
+      // 搜索增强：输入 “high/low/...” 时，允许命中其 canonical 父项（若存在该 effort 变体）
+      // 例：models 中有 gpt-5.2-high，则搜索 high 时也能看到 gpt-5.2
+      if (!effortTerm) return false;
+      const normalized = normalizeModel({ model: m.id });
+      if (normalized.modelCanonical !== m.id) return false; // 只对 canonical 父项生效
+      return canonicalEffortMap.get(normalized.modelCanonical)?.has(effortTerm) ?? false;
     });
-  }, [models, search]);
+  }, [canonicalEffortMap, models, search]);
 
   const clear = () => {
     setSearch("");

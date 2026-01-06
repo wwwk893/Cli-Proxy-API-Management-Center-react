@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { DateRange } from "react-day-picker";
 import type { Granularity, ViewMode } from "@/components/charts/usage/types";
+import type { EffortFilterValue, UsageModelGroupBy } from "@/lib/usage/model-normalize";
 import { applyPresetToParams, computePresetRange, readUsageSearchParams } from "../url-state";
 import type { PresetKey } from "../presets";
 
@@ -12,6 +13,8 @@ export type UsageUrlActions = {
   setPreset: (key: PresetKey | null) => void;
   setGranularity: (g: Granularity) => void;
   setViewMode: (mode: ViewMode) => void;
+  setModelGroupBy: (value: UsageModelGroupBy) => void;
+  setSelectedEfforts: (value: EffortFilterValue[]) => void;
   setSelectedModels: (models: string[]) => void;
   setSelectedChannels: (channels: string[]) => void;
   setSelectedSources: (sources: string[]) => void;
@@ -75,6 +78,27 @@ export function useUsageParams() {
     (mode: ViewMode) => {
       replaceParams((params) => {
         params.set("view", mode);
+      });
+    },
+    [replaceParams],
+  );
+
+  const setModelGroupBy = useCallback(
+    (value: UsageModelGroupBy) => {
+      replaceParams((params) => {
+        if (value === "canonical") params.delete("groupBy");
+        else params.set("groupBy", value);
+      });
+    },
+    [replaceParams],
+  );
+
+  const setSelectedEfforts = useCallback(
+    (value: EffortFilterValue[]) => {
+      const unique = Array.from(new Set(value.map((v) => v.trim()).filter(Boolean)));
+      replaceParams((params) => {
+        params.delete("efforts");
+        unique.forEach((v) => params.append("efforts", v));
       });
     },
     [replaceParams],
@@ -169,6 +193,8 @@ export function useUsageParams() {
     setPreset,
     setGranularity,
     setViewMode,
+    setModelGroupBy,
+    setSelectedEfforts,
     setSelectedModels,
     setSelectedChannels,
     setSelectedSources,

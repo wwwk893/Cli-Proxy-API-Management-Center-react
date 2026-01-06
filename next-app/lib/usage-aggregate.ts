@@ -70,13 +70,20 @@ export async function runUsageDailyAggregation(payload: AggregateJobPayload): Pr
     Prisma.sql`
     INSERT INTO "UsageDaily" (
       "id",
-      "date", "apiPath", "model", "proxyHost", "authSource", "authIndex", "authFailed",
+      "date", "apiPath", "model", "modelCanonical", "effort", "proxyHost", "authSource", "authIndex", "authFailed",
       "totalRequests", "inputTokens", "outputTokens", "reasoningTokens", "cachedTokens", "totalTokens", "costUsd"
     )
     SELECT
       gen_random_uuid(),
       date_trunc('day', "eventTime") as "date",
-      "apiPath", "model", "proxyHost", "authSource", "authIndex", "authFailed",
+      "apiPath",
+      "model",
+      COALESCE("modelCanonical", "model") AS "modelCanonical",
+      "effort",
+      "proxyHost",
+      "authSource",
+      "authIndex",
+      "authFailed",
       COUNT(*) as "totalRequests",
       SUM("inputTokens"),
       SUM("outputTokens"),
@@ -87,17 +94,20 @@ export async function runUsageDailyAggregation(payload: AggregateJobPayload): Pr
     FROM "UsageEvent"
     WHERE "eventTime" >= ${rangeFrom} AND "eventTime" <= ${rangeTo}
     ${filterSql}
-    GROUP BY 2,3,4,5,6,7,8
+    GROUP BY 2,3,4,5,6,7,8,9,10
     ON CONFLICT (
       "date",
       "apiPath",
       "model",
+      COALESCE("effort", ''),
       COALESCE("proxyHost", ''),
       COALESCE("authSource", ''),
       COALESCE("authIndex", -1),
       COALESCE("authFailed", false)
     )
     DO UPDATE SET
+      "modelCanonical"  = EXCLUDED."modelCanonical",
+      "effort"          = EXCLUDED."effort",
       "totalRequests"   = EXCLUDED."totalRequests",
       "inputTokens"     = EXCLUDED."inputTokens",
       "outputTokens"    = EXCLUDED."outputTokens",

@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { fetchUsageRaw } from "./cliproxy-client";
 import { serverEnv } from "@/lib/env";
 import { calcCostUsd, DEFAULT_PRICING, type PricingMap } from "./pricing";
+import { normalizeModel } from "@/lib/usage/model-normalize";
 
 type TokenDetails = {
   input_tokens?: number;
@@ -53,6 +54,8 @@ type UsageEventInput = {
   eventTime: Date;
   apiPath: string;
   model: string;
+  modelRaw?: string | null;
+  modelCanonical?: string | null;
   proxyHost: string;
   status?: string | null;
   inputTokens: number;
@@ -195,6 +198,8 @@ export async function ingestUsageFromProxy(options: IngestOptions): Promise<Inge
           pricingMap,
         });
 
+        const normalized = normalizeModel({ model });
+
         const rawKey = `${proxyHost}-${apiPath}-${model}-${ts}`;
 
         events.push({
@@ -202,6 +207,8 @@ export async function ingestUsageFromProxy(options: IngestOptions): Promise<Inge
           eventTime: eventDate,
           apiPath,
           model,
+          modelRaw: normalized.modelRaw,
+          modelCanonical: normalized.modelCanonical,
           proxyHost,
           status: d.status ?? null,
           inputTokens,
@@ -214,6 +221,7 @@ export async function ingestUsageFromProxy(options: IngestOptions): Promise<Inge
           authIndex,
           authFailed: d.failed ?? false,
           sourceType: "cliproxy",
+          effort: normalized.effort,
         });
       }
     }

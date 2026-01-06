@@ -6,6 +6,7 @@ import readline from "node:readline";
 import { prisma } from "./db";
 import { calcCostUsd } from "./pricing";
 import { loadPricingMap } from "./pricing-map";
+import { normalizeModel } from "./usage/model-normalize";
 
 type CodexTokenUsageLike = Record<string, unknown>;
 
@@ -22,6 +23,8 @@ type UsageEventInput = {
   eventTime: Date;
   apiPath: string;
   model: string;
+  modelRaw?: string | null;
+  modelCanonical?: string | null;
   proxyHost: string;
   status?: string | null;
   inputTokens: number;
@@ -341,6 +344,7 @@ async function parseRolloutFile(params: {
     if (!lastUsage) continue;
 
     const model = ctx.model ?? getFirstString(obj, ["model", "payload.model", "info.model"]) ?? "unknown";
+    const normalized = normalizeModel({ model, effort: ctx.effort });
     const inputTokens = lastUsage.inputTokens;
     const outputTokens = lastUsage.outputTokens;
     const reasoningTokens = lastUsage.reasoningTokens;
@@ -364,6 +368,8 @@ async function parseRolloutFile(params: {
       eventTime,
       apiPath: "codex-cli",
       model,
+      modelRaw: normalized.modelRaw,
+      modelCanonical: normalized.modelCanonical,
       proxyHost: deviceId,
       status: "completed",
       inputTokens,
@@ -380,7 +386,7 @@ async function parseRolloutFile(params: {
       cwd: ctx.cwd,
       originator: ctx.originator,
       cliVersion: ctx.cliVersion,
-      effort: ctx.effort,
+      effort: normalized.effort,
     });
   }
 

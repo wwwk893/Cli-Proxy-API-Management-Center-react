@@ -1,0 +1,1250 @@
+---
+schema: plan_pro_v1
+task:
+  name: "用量统计模型规范化与Effort维度改造"
+  dir: "feature/用量统计模型规范化与Effort维度改造"
+batch:
+  id: "0"
+meta:
+  timestamp: "2026-01-05"
+  author: "gpt-5.2-pro"
+---
+
+# GPT-5.2-Pro Plan — 用量统计模型规范化与Effort维度改造 / Batch 0
+
+> 主人操作：请将 gpt-5.2-pro 的完整输出粘贴到本文件中（建议覆盖替换本文件的正文），并保留文件名 `plan.pro.md`。
+
+## SUMMARY
+
+### 目标与“Done”定义（对齐 AC1-AC3）
+
+* **AC1 默认聚合按 modelCanonical**：将 `gpt-5.2-high / gpt-5.2-xhigh / gpt-5.2(high)` 等变体合并到同一基础模型行；同时保证 `gpt-5.2-codex*` 与 `gpt-5.2` **永不合并**（canonical 只剥离 effort 后缀，不做其它合并规则）。
+* **AC2 effort 可筛选/可下钻**：支持 `low/medium/high/xhigh + 未标注(null)`，并在 UI 上提供：
+
+  * View Mode 三分法：**基础模型（默认） / 基础模型+Effort / 原始模型(排错)**
+  * 原始模型视图显示警告条，并**禁用 effort 相关控件**
+* **AC3 迁移前后总量一致**：同时间窗/同筛选条件下，`SUM(requestCount/totalTokens/costUsd)` 保持不变，只是分组维度变化。
+
+### 核心实现策略（B-完整数据方案）
+
+1. **统一 normalizeModel**（单一口径函数）
+
+   * 输入：`modelRaw(原始模型字符串)` + `effort(可选显式字段)`
+   * 输出：`modelCanonical` + `effort(low|medium|high|xhigh|null)`
+   * 解析规则严格遵守：**仅从末尾解析** `-(low|medium|high|xhigh)` 或 `(low|medium|high|xhigh)`，统一小写；`-max` 不视为 effort。
+2. **DB 字段落地**
+
+   * `UsageEvent` 新增 `modelRaw`、`modelCanonical`；保留并统一写入 `effort`
+   * `UsageDaily` 新增 `modelCanonical`、`effort`，并将**日聚合维度扩展到包含 effort**（否则 Codex 类“model=base + effort=显式字段”的历史区间无法按 effort 统计）
+3. **API / 统计聚合扩展**
+
+   * `GET /api/usage/by-model` 支持 3 种聚合维度：
+
+     * `canonical`（默认）
+     * `canonical_effort`（canonical × effort）
+     * `raw`（modelRaw，排错）
+   * 支持 effort 过滤（raw 视图忽略/禁用）
+4. **UI 改造（采用 UI设计.md v3 √）**
+
+   * `/usage` 的 Top Models 表格增加 View Mode + Effort 筛选 + Effort 分布条
+   * Dashboard Top Models 口径与 `/usage` 默认视图一致（canonical）
+5. **迁移与回填**
+
+   * Prisma migration：新增列 + 必要索引/唯一性策略
+   * DB 内 backfill：批处理回填 `UsageEvent` 的 `modelRaw/modelCanonical/effort`；并**重建** `UsageDaily`（按天 delete + insert）以保证历史区间 effort 维度可用且总量不变
+
+---
+
+## DATA_STRUCTURES
+
+### 1) 统一口径：Effort 与 View Mode 类型（TypeScript，可直接落地）
+
+> 建议新增：`next-app/lib/usage/model-normalize.ts`（新增文件，导出下面这些类型与函数）
+
+```ts
+// next-app/lib/usage/model-normalize.ts
+
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+export type EffortLevel = typeof EFFORT_LEVELS[number];
+export type EffortOrNull = EffortLevel | null;
+
+// UI 里“未标注”需要一个可序列化值
+export type EffortFilterValue = EffortLevel | "unspecified"; // "unspecified" <-> null
+
+export const USAGE_MODEL_GROUP_BY = ["canonical", "canonical_effort", "raw"] as const;
+export type UsageModelGroupBy = typeof USAGE_MODEL_GROUP_BY[number];
+
+export type NormalizeModelInput = {
+  model: string;               // 原始字符串（来源模型字符串）
+  effort?: string | null;      // 可选显式字段（codex 可能提供）
+};
+
+export type NormalizeModelResult = {
+  modelRaw: string;            // trim 后原始模型
+  modelCanonical: string;      // 剥离末尾 effort 后缀后的模型
+  effort: EffortOrNull;        // 统一到 low/medium/high/xhigh 或 null
+  effortSource: "explicit" | "suffix" | "none" | "explicit_invalid" | "mismatch";
+  warnings: string[];          // 仅用于日志/调试，不上报前端
+};
+```
+
+### 2) Prisma 数据模型变更（B-完整）
+
+> 目标：落地新增字段 + 支持 `UsageDaily` 按 effort 维度切分（满足历史区间 effort 统计）
+
+#### `UsageEvent`（新增列）
+
+* `modelRaw`: String（建议 nullable 起步，回填后可考虑 future tightening）
+* `modelCanonical`: String（建议 nullable 起步）
+
+#### `UsageDaily`（新增列）
+
+* `modelCanonical`: String（建议 nullable 起步）
+* `effort`: String（建议 nullable 起步）
+
+#### Prisma schema 示例（建议写法）
+
+> 修改：`next-app/prisma/schema.prisma`（路径：`context/next-app/prisma/schema.prisma`）
+
+```prisma
+model UsageEvent {
+  id             String   @id @default(uuid())
+  rawKey         String   @unique
+  eventTime      DateTime
+  apiPath        String
+  model          String
+
+  // ✅ 新增（B-完整）
+  modelRaw       String?
+  modelCanonical String?
+
+  proxyHost      String?
+  status         String?
+  inputTokens    Int
+  outputTokens   Int
+  reasoningTokens Int
+  cachedTokens   Int
+  totalTokens    Int
+  costUsd        Decimal  @db.Decimal(18, 8)
+  authSource     String?
+  authIndex      Int?
+  authFailed     Boolean  @default(false)
+  sourceType     String?
+
+  // 已有：但需统一写入
+  effort         String?
+
+  sessionId      String?
+  cwd            String?
+  originator     String?
+  cliVersion     String?
+
+  createdAt      DateTime @default(now())
+
+  @@index([eventTime, model])
+  // ✅ 建议新增索引：避免热点路径 regex，支持按 canonical/effort 的时间窗聚合
+  @@index([eventTime, modelCanonical])
+  @@index([eventTime, modelCanonical, effort])
+}
+
+model UsageDaily {
+  id            String   @id @default(uuid())
+  date          DateTime
+  apiPath       String
+  model         String
+
+  // ✅ 新增（B-完整）
+  modelCanonical String?
+  effort         String?
+
+  proxyHost     String?
+  authSource    String?
+  authIndex     Int?
+  authFailed    Boolean  @default(false)
+
+  requestCount  Int
+  failureCount  Int
+  inputTokens   Int
+  outputTokens  Int
+  reasoningTokens Int
+  cachedTokens  Int
+  totalTokens   Int
+  costUsd       Decimal  @db.Decimal(18, 8)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // ⚠️ 注意：现有实现用 COALESCE 表达式索引做 upsert（见 usage-aggregate.ts）。
+  // Prisma 无法表达 expression unique index，迁移里需要手写 SQL（见 FILE_CHANGES）。
+  // schema 里可保留一个近似 unique 或仅保留普通索引，避免 prisma migrate 冲突。
+  @@index([date, model])
+  @@index([date, modelCanonical])
+  @@index([date, modelCanonical, effort])
+}
+```
+
+> 说明：`UsageDaily` 的唯一性与 upsert 依赖 **expression unique index + ON CONFLICT(expression list)**（当前代码已这么写）。新增 effort 后必须同步扩展该 expression index 与 ON CONFLICT 目标，否则会出现：
+
+* codex 场景：同日同 model(base) 不同 effort 需要拆成多行，否则无法历史区间 effort 统计
+* 同时，若不更新唯一性策略，upsert 可能报 “no unique constraint matching ON CONFLICT specification”
+
+### 3) `/api/usage/by-model` 请求/响应结构（TypeScript，直接可用）
+
+> 修改：`next-app/app/api/usage/by-model/route.ts`（路径：`context/next-app/app/api/usage/by-model/route.ts`）
+
+```ts
+// next-app/app/api/usage/by-model/types.ts (建议新增，用于复用)
+import type { EffortLevel, EffortOrNull, UsageModelGroupBy } from "@/lib/usage/model-normalize";
+
+export type UsageByModelQuery = {
+  from?: string; // ISO date
+  to?: string;   // ISO date
+  groupBy?: UsageModelGroupBy; // default "canonical"
+  groupBySource?: boolean;     // 现有能力
+  efforts?: Array<EffortLevel | "unspecified">; // raw 模式下忽略/不允许
+  // 其它已存在筛选项：channels/sources/models...（依赖现有 parseSearchParams）
+};
+
+export type UsageByModelRow = {
+  // “model”作为主显示字段（保持向后兼容）
+  // canonical/canonical_effort: model = modelCanonical
+  // raw: model = modelRaw(或 UsageDaily.model)
+  model: string;
+
+  // 额外字段用于 UI & 过滤映射
+  modelCanonical: string | null;
+  modelRaw: string | null;
+  effort: EffortOrNull;
+
+  // 子维度
+  authSource: string | null;
+
+  // 指标
+  requestCount: number;
+  failureCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  costUsd: number;
+
+  // 展示层定价拆分（不改计费，只是展示）
+  inputCostUsd: number | null;
+  outputCostUsd: number | null;
+  cachedCostUsd: number | null;
+
+  // 定价配置状态（考虑 canonical 聚合时的多 raw 冲突）
+  pricingConfigured: boolean;     // true 表示可确定且一致的定价配置（可用于 badge）
+  pricingConflict: boolean;       // canonical 下存在多个 raw 定价不一致
+  pricingModelIds: string[];      // 此聚合行覆盖到的 raw modelId 列表（用于 tooltip/debug）
+};
+
+export type UsageByModelResponse = {
+  data: UsageByModelRow[];
+  meta: {
+    groupBy: UsageModelGroupBy;
+    effortsApplied: Array<EffortLevel | "unspecified">;
+    usedDaily: boolean;
+    usedEvents: boolean;
+  };
+};
+```
+
+### 4) UI 状态模型（Usage Filters Context 增量）
+
+> 修改：`next-app/lib/usage/usage-filters-context.tsx`（路径：`context/next-app/lib/usage/usage-filters-context.tsx`）
+
+建议在现有 `state/actions` 基础上新增（命名避开现有 `viewMode`，防冲突）：
+
+```ts
+// next-app/lib/usage/usage-filters-context.tsx (增量建议)
+import type { UsageModelGroupBy, EffortFilterValue } from "@/lib/usage/model-normalize";
+
+export type UsageUiModelState = {
+  modelGroupBy: UsageModelGroupBy;         // 默认 "canonical"
+  selectedEfforts: EffortFilterValue[];    // 默认 []
+};
+
+export type UsageUiModelActions = {
+  setModelGroupBy: (value: UsageModelGroupBy) => void;
+  setSelectedEfforts: (value: EffortFilterValue[]) => void;
+};
+
+// 重要交互约束：raw 模式下 effort 控件禁用，但状态可保留用于回切恢复
+// 因此 setModelGroupBy("raw") 不强制清空 selectedEfforts，只是在查询/API 参数上忽略。
+```
+
+### 5) UsageModelTable 内部渲染数据结构（支持 3 层：canonical -> effort -> source）
+
+> 建议新增：`next-app/components/charts/usage-model-table/types.ts`
+
+```ts
+import type { EffortOrNull, EffortLevel, UsageModelGroupBy, EffortFilterValue } from "@/lib/usage/model-normalize";
+import type { UsageByModelRow } from "@/app/api/usage/by-model/types";
+
+export type Metrics = {
+  requestCount: number;
+  failureCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  cacheHitRate: number; // 展示衍生字段
+};
+
+export type EffortDistribution = Record<EffortLevel | "unspecified", number>; // 0..1 share
+
+export type SourceNode = {
+  kind: "source";
+  key: string; // "s:<canonical>|e:<effort>|src:<authSource>"
+  authSource: string | null;
+  metrics: Metrics;
+};
+
+export type EffortNode = {
+  kind: "effort";
+  key: string; // "e:<canonical>|<effort>"
+  effort: EffortOrNull;
+  label: string; // "high" | "未标注"
+  metrics: Metrics;
+  sources: SourceNode[];
+};
+
+export type CanonicalNode = {
+  kind: "canonical";
+  key: string; // "c:<canonical>"
+  modelCanonical: string;
+  metrics: Metrics;
+  distribution: EffortDistribution; // 用于 spark bar
+  efforts: EffortNode[];
+};
+
+export type TableViewModel =
+  | { groupBy: "canonical"; nodes: CanonicalNode[] }
+  | { groupBy: "canonical_effort"; rows: Array<{ key: string; modelCanonical: string; effort: EffortOrNull; metrics: Metrics; sources: SourceNode[] }> }
+  | { groupBy: "raw"; rows: Array<{ key: string; modelRaw: string; modelCanonical: string | null; effort: EffortOrNull; metrics: Metrics; sources: SourceNode[] }> };
+
+export type BuildTableModelParams = {
+  groupBy: UsageModelGroupBy;
+  effortFilter: EffortFilterValue[]; // raw 模式忽略
+  data: UsageByModelRow[];           // API leaf rows（通常带 authSource）
+};
+```
+
+---
+
+## ALGORITHMS
+
+### A1) normalizeModel：严格尾部解析 + 显式 effort 兼容（关键口径）
+
+> 新增：`next-app/lib/usage/model-normalize.ts`（symbol：`normalizeModel`, `parseEffortSuffix`）
+
+**伪代码**
+
+```pseudo
+EFFORT_SET = {"low","medium","high","xhigh"}
+
+function normalizeEffort(rawEffort):
+  if rawEffort is null/undefined: return null
+  s = trim(rawEffort).toLowerCase()
+  if s in EFFORT_SET: return s
+  return null
+
+function parseEffortSuffix(modelRaw):
+  m = trim(modelRaw)
+  // 只允许末尾：-(low|medium|high|xhigh) 或 (low|medium|high|xhigh)
+  match = regexMatch(m, /(?:-(low|medium|high|xhigh)|\((low|medium|high|xhigh)\))$/i)
+  if no match:
+    return { canonical: m, effort: null, matched: false, suffix: "" }
+
+  effort = lower(match.group1 or match.group2)
+  suffix = match.fullMatch  // includes leading "-" or "(...)"
+  canonical = m[0 : len(m)-len(suffix)]
+  return { canonical, effort, matched: true, suffix }
+
+function normalizeModel({model, effort?}):
+  modelRaw = trim(model)
+  explicit = normalizeEffort(effort)
+  parsed = parseEffortSuffix(modelRaw)  // may be null
+
+  warnings = []
+  if explicit != null:
+    // canonical 仍按 suffix 规则剥离（如果命中）
+    modelCanonical = parsed.canonical
+    if parsed.matched and parsed.effort != explicit:
+      warnings.push("effort_mismatch: explicit != suffix")
+      effortSource = "mismatch"
+    else:
+      effortSource = "explicit"
+    normalizedEffort = explicit
+  else:
+    if parsed.matched:
+      effortSource = "suffix"
+      normalizedEffort = parsed.effort
+      modelCanonical = parsed.canonical
+    else:
+      effortSource = "none"
+      normalizedEffort = null
+      modelCanonical = modelRaw
+
+  // 保底：canonical 不能为空
+  if modelCanonical == "":
+    modelCanonical = modelRaw
+    warnings.push("canonical_empty_fallback")
+
+  return { modelRaw, modelCanonical, effort: normalizedEffort, effortSource, warnings }
+```
+
+**边界案例（必须覆盖）**
+
+* `gpt-5.2-high` -> canonical=`gpt-5.2`, effort=`high`
+* `gpt-5.2(high)` -> canonical=`gpt-5.2`, effort=`high`
+* `gpt-5.2-max` -> canonical=`gpt-5.2-max`, effort=`null`（`max` 不在集合内）
+* `gpt-5.2-codex-high` -> canonical=`gpt-5.2-codex`, effort=`high`（codex 保留）
+* `gpt-5.2-codex-max-high` -> canonical=`gpt-5.2-codex-max`, effort=`high`
+
+---
+
+### A2) 入库统一写入 modelRaw/modelCanonical/effort（3 条 ingest）
+
+> 修改点锚定：
+
+* `next-app/lib/usage-ingest.ts`（symbol：`ingestUsageFromProxy`，在 `events.push({ ... })` 处补字段）
+* `next-app/lib/codex-ingest.ts`（symbol：`parseRolloutFile` 里 `events.push({ ... })`）
+* `next-app/lib/opencode-ingest.ts`（symbol：`parseMessageToUsageEvent` + `update` 语句 data）
+
+#### Cliproxy（usage-ingest.ts）
+
+**关键点**
+
+* 不能改变成本口径：`calcCostUsd(...)` 仍用原 `model`（即 `modelRaw`）
+* 但写入 DB 时：
+
+  * `modelRaw = 原 model`
+  * `modelCanonical/effort = normalizeModel(...)` 输出
+  * `effort` 字段统一写入（lowercase）
+
+**伪代码**
+
+```pseudo
+rawModel = usage.model ?? "unknown"
+norm = normalizeModel({ model: rawModel, effort: null })
+
+events.push({
+  model: rawModel,
+  modelRaw: norm.modelRaw,
+  modelCanonical: norm.modelCanonical,
+  effort: norm.effort,
+  costUsd: calcCostUsd(model=rawModel, ...)
+})
+```
+
+#### Codex（codex-ingest.ts）
+
+**关键点**
+
+* codex 日志可能提供 `ctx.effort`（显式字段）。
+* normalizeModel 需要兼容 `effort: ctx.effort`，并在 mismatch 时仅记录 warning，不改成本。
+
+**伪代码**
+
+```pseudo
+rawModel = ctx.model ?? extractedModel ?? "unknown"
+norm = normalizeModel({ model: rawModel, effort: ctx.effort })
+
+events.push({
+  model: rawModel,
+  modelRaw: norm.modelRaw,
+  modelCanonical: norm.modelCanonical,
+  effort: norm.effort,
+  costUsd: calcCostUsd(model=rawModel, ...)
+})
+```
+
+#### OpenCode（opencode-ingest.ts）
+
+**关键点**
+
+* OpenCode message.modelID 作为 rawModel
+* 统一 normalizeModel 后写入新字段
+* update 分支要同步更新 `modelRaw/modelCanonical/effort`，保证幂等（重复 ingest 时字段不会缺）
+
+---
+
+### A3) UsageDaily 日聚合：必须按 effort 维度切分（历史区间可用）
+
+> 修改：`next-app/lib/usage-aggregate.ts`（symbol：`runUsageDailyAggregation` SQL）
+
+#### 为什么必须切分
+
+* Codex 可能是 `model=gpt-5.2-codex-max` + `effort=high/xhigh`，如果日表不按 effort 切分，那么历史区间 “只看 high” 无法从日表精确得出。
+
+#### 关键 SQL 变更
+
+1. SELECT 增加：
+
+* `modelCanonical`：来自 `UsageEvent.modelCanonical`（fallback `model`）
+* `effort`：来自 `UsageEvent.effort`
+
+2. GROUP BY 增加：`modelCanonical, effort`
+3. INSERT INTO `UsageDaily` 增加列：`modelCanonical, effort`
+4. ON CONFLICT 目标表达式与唯一索引需同步增加 `COALESCE(effort,'')`
+
+**伪代码（结构）**
+
+```pseudo
+WITH agg AS (
+  SELECT
+    date_trunc('day', eventTime) as date,
+    apiPath,
+    model as modelRaw,
+    COALESCE(modelCanonical, model) as modelCanonical,
+    effort,
+    proxyHost, authSource, authIndex, authFailed,
+    COUNT(*) as requestCount,
+    SUM(...) as token sums,
+    SUM(costUsd) as costUsd
+  FROM UsageEvent
+  WHERE eventTime in [from, to)
+  GROUP BY date, apiPath, modelRaw, modelCanonical, effort, proxyHost, authSource, authIndex, authFailed
+)
+
+INSERT INTO UsageDaily(...)
+SELECT gen_random_uuid(), ... FROM agg
+ON CONFLICT (date, apiPath, modelRaw, COALESCE(proxyHost,''), ..., COALESCE(effort,''))
+DO UPDATE SET ... = EXCLUDED....
+```
+
+#### 并发/幂等性
+
+* 该聚合天然可幂等：同一时间窗重复执行会 upsert 到同一行
+* 但前提是：**DB 侧存在与 ON CONFLICT 一致的 unique expression index**（必须迁移保证）
+
+---
+
+### A4) 历史数据回填（DB 内 backfill）：两段式
+
+> 目标：避免长事务锁表，同时保证可重入。
+
+#### Phase 1：回填 UsageEvent 新列（批处理）
+
+> 建议新增脚本：`next-app/scripts/backfill-usage-model-normalization.ts`（或 `next-app/lib/usage/backfill.ts` + package.json script）
+
+**选择范围条件**
+
+* `modelRaw IS NULL OR modelCanonical IS NULL OR effort` 未规范（不是 null 且不在集合 / 大写）
+
+**批处理策略**
+
+* 每批 `N=5_000` 行（可配置）
+* 以 `eventTime` 或 `id` 排序，使用游标（cursor）推进
+* 每批用 `UPDATE ... FROM (VALUES ...)` 一次性更新，减少 roundtrip
+
+**伪代码**
+
+```pseudo
+cursor = loadCursor("usageModelBackfill") or null
+loop:
+  rows = SELECT id, model, modelRaw, effort FROM UsageEvent
+         WHERE (needs_backfill) AND (cursor filter)
+         ORDER BY eventTime ASC, id ASC
+         LIMIT batchSize
+
+  if rows empty: break
+
+  updates = []
+  for row in rows:
+    raw = row.modelRaw ?? row.model
+    norm = normalizeModel({ model: raw, effort: row.effort })
+    updates.push({ id: row.id, modelRaw: raw, modelCanonical: norm.modelCanonical, effort: norm.effort })
+
+  execute SQL:
+    UPDATE UsageEvent e
+    SET modelRaw = v.modelRaw,
+        modelCanonical = v.modelCanonical,
+        effort = v.effort
+    FROM (VALUES ... ) v(id, modelRaw, modelCanonical, effort)
+    WHERE e.id = v.id
+
+  cursor = max(rows.eventTime,id)
+  saveCursor(...)
+```
+
+**失败处理**
+
+* 单批失败：记录日志 + 退出，下一次可从 cursor 继续
+* 若 normalizeModel 产生 warnings：仅计数日志，不中断（避免脏数据阻塞）
+
+#### Phase 2：重建 UsageDaily（保证历史区间 effort 维度正确）
+
+> 由于旧 UsageDaily 可能是“未按 effort 切分”的聚合结果，不能简单 UPDATE effort 字段解决，必须重建。
+
+**建议策略：按天重建，避免长锁**
+
+* 对目标范围（建议：系统保留期或最早数据至今）逐天执行：
+
+  1. `DELETE FROM UsageDaily WHERE date = dayStart`
+  2. `runUsageDailyAggregation({ from: dayStart, to: dayStart+1d })`
+* 这样任何时刻只有当天的数据短暂缺失，影响面可控
+
+**伪代码**
+
+```pseudo
+for day in each day in [startDay, endDay):
+  tx:
+    DELETE UsageDaily WHERE date = dayStart
+    INSERT/UPSERT daily agg for [dayStart, dayStart+1d)
+```
+
+**一致性保证**
+
+* 每天重建后，该天的 `SUM(requestCount,totalTokens,costUsd)` 应与从 UsageEvent 同日聚合一致
+* 全范围完成后，API 的 canonical/effort 统计可完全依赖 UsageDaily + 今日 UsageEvent
+
+---
+
+### A5) `/api/usage/by-model` 三视图聚合 + effort 筛选（不跑 regex）
+
+> 修改：`next-app/app/api/usage/by-model/route.ts`
+
+#### 入参扩展
+
+* `groupBy=canonical|canonical_effort|raw`（默认 canonical）
+* `efforts=high&efforts=unspecified...`（raw 模式下忽略或直接不允许）
+
+#### 查询策略（保持现有“过去用 daily，今天用 event”）
+
+* 继续使用当前逻辑：
+
+  * `useDaily = fromDate < todayStart`
+  * `useEvents = toDate > todayStart`
+* 但 SELECT/GROUP BY 根据 groupBy 动态选择字段（走预计算列）
+
+  * canonical：按 `COALESCE(modelCanonical, modelRaw)` 聚合
+  * canonical_effort：按 `COALESCE(modelCanonical, modelRaw), effort` 聚合
+  * raw：按 `COALESCE(modelRaw, model)`（或直接 UsageDaily.model）聚合
+
+#### effort filter SQL（只作用于非 raw）
+
+```pseudo
+if groupBy != "raw" and efforts not empty:
+  includeNull = efforts includes "unspecified"
+  values = efforts without "unspecified"
+  where:
+    if includeNull and values non-empty: (effort IS NULL OR effort IN values)
+    else if includeNull: effort IS NULL
+    else: effort IN values
+```
+
+#### canonical 聚合下定价配置冲突处理（展示层，不改 costUsd）
+
+> 目标：对 canonical 行返回 `pricingModelIds`，并能判断是否冲突，避免误用单一 modelId 的 pricing。
+
+**SQL 层增加：收集覆盖到的 raw modelId**
+
+* 在 dailyRows 与 eventRows 的 SELECT 中增加：
+
+  * `ARRAY_AGG(DISTINCT model) AS modelIds`（这里的 `model` 是原始计费/定价匹配的 modelId）
+
+**合并层（JS）对聚合行做 union**
+
+```pseudo
+row.pricingModelIds = union(all leaf modelIds)
+pricingConfigured = all ids in configuredSet AND all pricingMap[id] exists AND rates identical
+pricingConflict = rates not identical (or 部分缺失)
+if pricingConfigured:
+  compute inputCostUsd/outputCostUsd/cachedCostUsd using that single consistent rate
+else:
+  set those breakdown fields = null
+```
+
+#### 幂等/并发
+
+* API 纯查询，无写入，不存在幂等问题
+* 性能关键：
+
+  * 只用 `modelCanonical/effort` 预计算列
+  * 依赖 `UsageDaily(date, modelCanonical, effort)` 索引加速
+
+---
+
+### A6) UI：UsageModelTable 三视图渲染模型（可落地的构建流程）
+
+> 修改/拆分：`next-app/components/charts/usage-model-table.tsx`（建议拆成目录，避免 >600 行）
+
+#### 数据获取策略
+
+* canonical 视图：为了画 “Effort 分布条”，建议请求 leaf 数据按 `canonical_effort` 粒度（包含 effort）
+
+  * API 请求：`groupBy=canonical_effort&groupBySource=true`
+  * 客户端再合成 canonical 行与 distribution
+* canonical_effort 视图：直接按 canonical_effort 展示（同上数据即可）
+* raw 视图：请求 `groupBy=raw&groupBySource=true`（effort filter disabled，不带 efforts）
+
+#### buildTableModel（客户端）伪代码
+
+```pseudo
+function buildMetrics(rows):
+  sum all numeric fields
+  cacheHitRate = totalTokens>0 ? cachedTokens/totalTokens : 0
+  return metrics
+
+function buildCanonicalModel(dataLeafRows, effortFilter):
+  // leaf rows are grouped by (canonical, effort, authSource) already
+  // apply effort filter here (includes null when "unspecified")
+  leaf = applyEffortFilter(dataLeafRows, effortFilter)
+
+  groupByCanonical = map canonical -> list leaf
+  for each canonical:
+    groupByEffort = map effort -> list leaf
+    effortNodes = []
+    distribution = init all to 0
+    for each effort:
+      sources = group by authSource -> metrics
+      metrics = buildMetrics(all leaf in this effort)
+      effortNodes.push(...)
+      distribution[effortOrUnspecified] = metrics.totalTokens (or costUsd)  // choose metric later
+    canonicalMetrics = buildMetrics(all leaf)
+    normalize distribution to shares (sum=1)
+    canonicalNodes.push({ metrics, distribution, efforts: effortNodes })
+  sort canonicalNodes by costUsd desc
+  return canonicalNodes
+
+function buildCanonicalEffortRows(dataLeafRows, effortFilter):
+  leaf = applyEffortFilter(...)
+  rows = group by (canonical, effort) -> merge sources
+  sort by costUsd desc
+  return rows
+
+function buildRawRows(dataLeafRows):
+  // leaf rows grouped by (modelRaw, authSource)
+  rows = group by modelRaw -> merge sources
+  sort by costUsd desc
+  return rows
+```
+
+#### 交互规则落地（对齐 v3/v4）
+
+* View 切换到 raw：
+
+  * 折叠所有展开状态（expanded keys 清空）
+  * 显示黄色 warning banner
+  * Effort Filter 控件 disabled（但保留其 state 以便回切恢复）
+* Effort Filter：
+
+  * 多选：low/medium/high/xhigh/未标注
+  * 未标注 = effort null
+  * 组合规则：选择 high + 未标注 => `effort IN ('high') OR effort IS NULL`
+* 空态：
+
+  * 全局无数据：提示“暂无数据”
+  * 筛选无结果：提示“当前筛选无匹配模型”并提供“一键清除筛选”
+* 移动端：
+
+  * `Requests`、`Effort Dist.` 等列在窄屏隐藏（使用 `hidden sm:table-cell` 之类）
+
+---
+
+## FILE_CHANGES
+
+> 说明：下面路径以 `next-app/` 为仓库根相对路径描述；并同时给出“证据锚点”（路径 + 关键符号）便于你对照改动位置。
+
+### 1) 数据库与迁移
+
+* **MODIFY** `next-app/prisma/schema.prisma`
+
+  * 增加字段：`UsageEvent.modelRaw`, `UsageEvent.modelCanonical`, `UsageDaily.modelCanonical`, `UsageDaily.effort`
+  * 增加索引：`UsageEvent @@index([eventTime, modelCanonical, effort])`，`UsageDaily @@index([date, modelCanonical, effort])`
+  * 锚点：`model UsageEvent { ... }` / `model UsageDaily { ... }`
+* **ADD** `next-app/prisma/migrations/<ts>_usage_model_canonical_effort/migration.sql`（手写 SQL 必须包含）
+
+  * `ALTER TABLE "UsageEvent" ADD COLUMN ...`
+  * `ALTER TABLE "UsageDaily" ADD COLUMN ...`
+  * 为 `UsageDaily` 创建/替换 unique expression index（包含 `COALESCE(effort,'')`）
+  * 可选：为新列创建 BTREE 索引
+  * 锚点：migration.sql
+
+### 2) 规范化核心库
+
+* **ADD** `next-app/lib/usage/model-normalize.ts`
+
+  * 新增：`normalizeModel()`、`parseEffortSuffix()`、`normalizeEffort()`
+  * 导出：`EffortLevel`、`UsageModelGroupBy` 等类型
+  * 锚点：`export function normalizeModel(...)`
+* **ADD (可选但强烈建议)** `next-app/lib/usage/model-normalize.node-test.ts`
+
+  * 使用 Node 自带 `node:test` 做用例覆盖（不引入依赖）
+  * 锚点：`test("normalizeModel ...")`
+
+### 3) 入库侧（3 个 ingest）
+
+* **MODIFY** `next-app/lib/usage-ingest.ts`
+
+  * 在 `ingestUsageFromProxy` 中：
+
+    * 对 `model` 执行 `normalizeModel`
+    * 写入 `modelRaw/modelCanonical/effort`
+    * 保持 `calcCostUsd` 使用 rawModel（计费口径不变）
+  * 锚点：`events.push({ ... model ... costUsd ... })`
+* **MODIFY** `next-app/lib/codex-ingest.ts`
+
+  * 在 `parseRolloutFile` 里：
+
+    * `normalizeModel({ model, effort: ctx.effort })`
+    * 写入 `modelRaw/modelCanonical/effort`
+  * 锚点：`events.push({ ... effort: ctx.effort })`
+* **MODIFY** `next-app/lib/opencode-ingest.ts`
+
+  * 在 `parseMessageToUsageEvent` 返回对象中写入 `modelRaw/modelCanonical/effort`
+  * 在 update 分支同步更新新字段（避免旧数据缺字段）
+  * 锚点：`return { ... model, ... }` 与 `tx.usageEvent.update({ data: { ... } })`
+
+### 4) 日聚合与回填
+
+* **MODIFY** `next-app/lib/usage-aggregate.ts`
+
+  * `runUsageDailyAggregation`：
+
+    * SELECT 增加 `modelCanonical/effort`
+    * GROUP BY 增加 `modelCanonical/effort`
+    * INSERT 增加列
+    * ON CONFLICT 目标表达式增加 `COALESCE("effort",'')`
+  * 锚点：`const insertSql = Prisma.sql\` ... ``、`ON CONFLICT (...)`
+* **ADD** `next-app/scripts/backfill-usage-model-normalization.ts`（或 `next-app/lib/usage/backfill-usage-model-normalization.ts`）
+
+  * 回填 UsageEvent：批处理 + cursor
+  * 重建 UsageDaily：按天 delete + runUsageDailyAggregation
+  * 锚点：`main()` / `backfillUsageEventModels()` / `rebuildUsageDailyByDay()`
+
+### 5) 统计 API
+
+* **MODIFY** `next-app/app/api/usage/by-model/route.ts`
+
+  * 新增 query param：`groupBy`, `efforts`
+  * SQL 动态 group key（canonical/canonical_effort/raw）
+  * 叶子行增加 `ARRAY_AGG(DISTINCT model) AS modelIds` 用于定价冲突判定
+  * 结果结构增加：`modelRaw/modelCanonical/effort/pricingConflict/pricingModelIds`
+  * 锚点：`usageByModelQuerySchema`、`dailyRowsSql`、`eventRowsSql`、`merge` 逻辑
+* **MODIFY（可能需要）** `next-app/app/api/models/route.ts`
+
+  * 若现状无法满足“搜 high 命中 canonical”，可扩展返回字段（如 `aliases`），或保持不动改客户端
+  * 锚点：`return NextResponse.json(data)`
+* **MODIFY（可能需要）** `next-app/app/api/model-pricing/...`（仓库内定位）
+
+  * 评估 canonical 聚合后定价匹配与冲突提示策略（不改 cost 口径）
+  * 锚点：搜索 `modelPricing` 相关路由/页面（见实现 checklist 的“定位步骤”）
+
+### 6) UI：Usage 页与组件拆分（避免 >600 行）
+
+* **MODIFY** `next-app/lib/usage/usage-filters-context.tsx`
+
+  * state 增加：`modelGroupBy`, `selectedEfforts`
+  * actions 增加：`setModelGroupBy`, `setSelectedEfforts`
+  * 锚点：`export function UsageFiltersProvider`（state/actions 定义处）
+* **MODIFY** `next-app/app/(app)/usage/components/usage-content.tsx`
+
+  * 从 context state 读取 `modelGroupBy/selectedEfforts`
+  * 传给 `UsageModelTable`，并在 `extraHeader` 里加入 ViewMode + EffortFilter 控件
+  * 锚点：`<UsageModelTable ... />`
+* **MODIFY** `next-app/components/usage/filter-popover.tsx`
+
+  * 搜索增强：输入 “high” 命中 canonical 父项
+  * 最小实现：在过滤时对每个 model 生成别名（`${id}-high`, `${id}(high)` 等），纳入匹配
+  * 锚点：`const filteredModels = useMemo(() => ...)`
+* **MODIFY + SPLIT** `next-app/components/charts/usage-model-table.tsx`
+
+  * 逻辑大幅增加，预计 >600 行，必须拆分（见下方新增文件）
+  * 锚点：`export function UsageModelTable(...)`
+* **ADD** `next-app/components/charts/usage-model-table/`（目录建议）
+
+  * `types.ts`：Table 数据结构（CanonicalNode/EffortNode/SourceNode）
+  * `build-table-model.ts`：`buildTableModel()` 数据聚合
+  * `effort-filter.tsx`：Effort 多选下拉（disabled 支持）
+  * `view-mode-toggle.tsx`：三段 ToggleGroup（canonical/canonical_effort/raw）
+  * `effort-spark-bar.tsx`：Effort 分布条（sparkline/stacked bar）
+  * `raw-warning-banner.tsx`：Raw 视图警告条 + “返回默认视图”按钮
+  * `rows.tsx`：行渲染组件（CanonicalRow/EffortRow/SourceRow）
+* **MODIFY** `next-app/app/(app)/components/dashboard/components/TopModelsCard.tsx`
+
+  * 展示口径对齐：模型名/排序与 `/usage` 默认 canonical 一致
+  * 如接入 pricing conflict，可展示更准确的 badge（可选）
+  * 锚点：`data.topModels.map((row) => ...)`
+
+---
+
+## IMPLEMENTATION_CHECKLIST
+
+> 每项均包含：涉及文件 + 关键符号 + Done 条件 + 预期产物
+
+### 1) 新增 normalizeModel 统一口径模块
+
+* [ ] **Files**：`next-app/lib/usage/model-normalize.ts`
+  **Symbols**：`normalizeModel()`, `parseEffortSuffix()`, `EFFORT_LEVELS`, `UsageModelGroupBy`
+  **Done when**：
+
+  * 本地可运行（被 ingest / backfill / API / UI 任一处引用不报 TS 错）
+  * 覆盖至少 10 个边界用例（见 VERIFICATION_CHECKLIST V1）
+    **Expected artifact**：
+  * 任意给定 model 字符串，可稳定得到 `(modelRaw, modelCanonical, effort)`，且 `-max` 不被识别为 effort
+
+### 2) Prisma schema 更新 + 迁移文件生成
+
+* [ ] **Files**：`next-app/prisma/schema.prisma`
+  **Symbols**：`model UsageEvent`, `model UsageDaily`
+  **Done when**：
+
+  * schema 增加 4 个新字段，并通过 `prisma validate`
+  * 确认未引入 forbidden 依赖
+    **Expected artifact**：
+  * schema 中可见 `modelRaw/modelCanonical/effort`（UsageDaily 的 effort 为新增）
+* [ ] **Files**：`next-app/prisma/migrations/<ts>_usage_model_canonical_effort/migration.sql`
+  **Symbols**：SQL: `ALTER TABLE`, `CREATE INDEX`, `CREATE UNIQUE INDEX`
+  **Done when**：
+
+  * migration 能在空库与已有库执行成功
+  * `UsageDaily` 的 unique expression index 已包含 `COALESCE(effort,'')`（与 usage-aggregate 的 ON CONFLICT 一致）
+    **Expected artifact**：
+  * DB 中 `\d UsageEvent` / `\d UsageDaily` 可看到新增列
+  * `UsageDaily` 存在新的 unique index（表达式形式）与新索引
+
+### 3) Cliproxy 入库写入新字段（不改计费口径）
+
+* [ ] **Files**：`next-app/lib/usage-ingest.ts`
+  **Symbols**：`ingestUsageFromProxy()`, `events.push(...)`
+  **Done when**：
+
+  * 事件写入时包含 `modelRaw/modelCanonical/effort`
+  * `costUsd` 计算仍使用原 `model`（raw）
+    **Expected artifact**：
+  * 新写入的 UsageEvent 行满足：`modelRaw` 非空、`modelCanonical` 非空、`effort` 为 low/medium/high/xhigh/null
+
+### 4) Codex/OpenCode 入库写入新字段（显式 effort 兼容）
+
+* [ ] **Files**：`next-app/lib/codex-ingest.ts`
+  **Symbols**：`parseRolloutFile()`, `extractTurnContext()`
+  **Done when**：
+
+  * `ctx.effort` 被 normalize 到 lowercase 并写入 UsageEvent.effort
+  * 同时写入 `modelRaw/modelCanonical`
+    **Expected artifact**：
+  * codex 事件的 `effort` 在 DB 中可直接用于历史区间筛选
+* [ ] **Files**：`next-app/lib/opencode-ingest.ts`
+  **Symbols**：`parseMessageToUsageEvent()`, `tx.usageEvent.update({ data: ... })`
+  **Done when**：
+
+  * create 与 update 两条路径都写入 `modelRaw/modelCanonical/effort`
+    **Expected artifact**：
+  * 重复执行 ingest 不会产生“旧记录缺字段”的情况（幂等）
+
+### 5) UsageDaily 聚合改造：按 effort 维度切分
+
+* [ ] **Files**：`next-app/lib/usage-aggregate.ts`
+  **Symbols**：`runUsageDailyAggregation()`，`insertSql`，`ON CONFLICT (...)`
+  **Done when**：
+
+  * 聚合 SQL 的 SELECT/GROUP BY/INSERT/ON CONFLICT 均包含 `modelCanonical` 与 `effort`
+  * 与迁移里的 unique expression index 对齐
+    **Expected artifact**：
+  * 对同一天同 model(base) 不同 effort 的事件，UsageDaily 会产生多行（effort 不同），且总和不变
+
+### 6) 新增 backfill 脚本：回填 UsageEvent + 重建 UsageDaily
+
+* [ ] **Files**：`next-app/scripts/backfill-usage-model-normalization.ts`（新增）
+  **Symbols**：`backfillUsageEventModels()`, `rebuildUsageDailyByDay()`, `cursor`
+  **Done when**：
+
+  * 脚本可 dry-run 与实际执行
+  * 支持中断后可继续（cursor）
+  * 每批失败不会破坏已完成部分（幂等）
+    **Expected artifact**：
+  * 历史 UsageEvent 行补齐 `modelRaw/modelCanonical/effort`
+  * 目标历史区间内 UsageDaily 重建完成，且与事件表对账一致（见 VERIFICATION_CHECKLIST V3-V5）
+
+### 7) `/api/usage/by-model` 支持三视图聚合 + effort 筛选
+
+* [ ] **Files**：`next-app/app/api/usage/by-model/route.ts`
+  **Symbols**：`usageByModelQuerySchema`（需扩展 groupBy/efforts），`dailyRowsSql`, `eventRowsSql`, `merge`
+  **Done when**：
+
+  * `groupBy=canonical` 返回按 canonical 聚合数据
+  * `groupBy=canonical_effort` 返回 canonical×effort 聚合数据
+  * `groupBy=raw` 返回 raw 聚合数据，并忽略 efforts
+  * effort 过滤在非 raw 下生效（含 unspecified）
+    **Expected artifact**：
+  * API 返回行包含 `modelCanonical/modelRaw/effort/pricingModelIds/pricingConflict`
+  * 同时间窗切换 groupBy 后 `SUM(requestCount/totalTokens/costUsd)` 不变
+
+### 8) UI 状态：UsageFiltersContext 增加 modelGroupBy 与 selectedEfforts
+
+* [ ] **Files**：`next-app/lib/usage/usage-filters-context.tsx`
+  **Symbols**：`state.modelGroupBy`, `state.selectedEfforts`, `actions.setModelGroupBy`, `actions.setSelectedEfforts`
+  **Done when**：
+
+  * Usage 页任何子组件可读取/更新这两个状态
+  * raw 模式下 effort 状态保留但查询层忽略
+    **Expected artifact**：
+  * 切换 raw 再切回 canonical，effort 筛选会恢复上次选择（符合 v3 交互）
+
+### 9) UI 组件：View Mode Toggle + Effort Filter + Raw Warning Banner
+
+* [ ] **Files**：
+
+  * `next-app/components/charts/usage-model-table/view-mode-toggle.tsx`（新增）
+  * `next-app/components/charts/usage-model-table/effort-filter.tsx`（新增）
+  * `next-app/components/charts/usage-model-table/raw-warning-banner.tsx`（新增）
+    **Symbols**：`ViewModeToggle`, `EffortFilter`, `RawWarningBanner`
+    **Done when**：
+  * View Toggle 可切换 3 模式
+  * Raw 模式显示 warning banner 并提供“返回默认视图”按钮
+  * Effort Filter 在 raw 模式 disabled 且有 tooltip/title 提示
+    **Expected artifact**：
+  * UI 与 UI设计.md v3/v4 的 warning 行为一致
+
+### 10) FilterPopover 搜索增强（high 命中 canonical）
+
+* [ ] **Files**：`next-app/components/usage/filter-popover.tsx`
+  **Symbols**：`filteredModels useMemo`（加入 aliases 匹配），`placeholder` 文案
+  **Done when**：
+
+  * 搜索框输入 `high` 时，列表能出现 `gpt-5.2`（即使 id 本身不包含 high）
+    **Expected artifact**：
+  * 用户可以用 “记忆中的变体名” 搜索到 canonical 父项（符合验收点 #8）
+
+### 11) UsageModelTable：三视图渲染 + Effort 分布条 + 多层展开
+
+* [ ] **Files**：
+
+  * `next-app/components/charts/usage-model-table.tsx`（大改，建议仅做薄 wrapper）
+  * `next-app/components/charts/usage-model-table/build-table-model.ts`（新增）
+  * `next-app/components/charts/usage-model-table/effort-spark-bar.tsx`（新增）
+  * `next-app/components/charts/usage-model-table/rows.tsx`（新增）
+  * `next-app/components/charts/usage-model-table/types.ts`（新增）
+    **Symbols**：`buildTableModel()`, `EffortSparkBar`, `CanonicalRow/EffortRow/SourceRow`
+    **Done when**：
+  * 默认 canonical：表格显示 canonical 行，Effort 列显示分布条；展开后可看到 effort 子行（可选再展开 source）
+  * canonical_effort：平铺 canonical+effort 行，展开显示 source
+  * raw：显示 raw 模型字符串，出现 warning banner，effort filter disabled
+  * 空态/错误态/加载态符合 v3 状态矩阵
+  * 移动端隐藏次要列
+    **Expected artifact**：
+  * `/usage` Top Models 完整实现 UI设计.md v3 √ 行为
+
+### 12) UsageContent 集成（把新控件放进 Top Models header 区）
+
+* [ ] **Files**：`next-app/app/(app)/usage/components/usage-content.tsx`
+  **Symbols**：`<UsageModelTable ... />`, `extraHeader` 区域
+  **Done when**：
+
+  * View toggle + effort filter + model filter + source filter 在 header 行内布局合理
+  * 触发 actions 后会刷新表格（依赖 refreshKey 或 fetch deps）
+    **Expected artifact**：
+  * 用户无需离开 Top Models 卡片即可完成视图切换与筛选
+
+### 13) Dashboard Top Models 口径对齐（canonical 默认）
+
+* [ ] **Files**：`next-app/app/(app)/components/dashboard/components/TopModelsCard.tsx` +（定位并修改 dashboard 数据来源文件）
+  **Symbols**：`row.model` 显示逻辑、`data.topModels` 数据生成（需定位）
+  **Done when**：
+
+  * Dashboard Top Models 排序/聚合与 `/usage` 默认 canonical 一致
+    **Expected artifact**：
+  * 同一时间窗下，Dashboard Top5 与 `/usage` canonical Top5（按 costUsd）一致
+
+---
+
+## VERIFICATION_CHECKLIST
+
+### V1) normalizeModel 单元用例（不引入依赖）
+
+* [ ] **Files**：`next-app/lib/usage/model-normalize.node-test.ts`（或你仓库现有测试框架对应文件）
+  **Symbols**：`normalizeModel()`
+  **Steps**：执行 `node --test ...` 或 `pnpm test`
+  **Expected**：
+
+  * `gpt-5.2-high` -> canonical `gpt-5.2`, effort `high`
+  * `gpt-5.2(high)` -> canonical `gpt-5.2`, effort `high`
+  * `gpt-5.2-xhigh` -> canonical `gpt-5.2`, effort `xhigh`
+  * `gpt-5.2-max` -> canonical `gpt-5.2-max`, effort `null`
+  * `gpt-5.2-codex-high` -> canonical `gpt-5.2-codex`, effort `high`
+  * `gpt-5.2-codex-max-high` -> canonical `gpt-5.2-codex-max`, effort `high`
+
+### V2) DB 迁移验证（列/索引/唯一性）
+
+* [ ] **Files**：`prisma/migrations/.../migration.sql`
+  **Steps**：
+
+  * 在 staging 执行 migrate
+  * `\d "UsageEvent"` / `\d "UsageDaily"` 检查列存在
+  * `\di` 检查新索引存在（尤其 `UsageDaily` unique expression index）
+    **Expected**：
+  * 新列存在
+  * `UsageDaily` 的 upsert 不报 conflict target 错误
+
+### V3) 回填 UsageEvent 对账（字段覆盖率）
+
+* [ ] **Files**：backfill 脚本 + `UsageEvent` 表
+  **Steps (SQL)**：
+
+  * 回填前统计：
+
+    * `SELECT COUNT(*) FILTER (WHERE "modelCanonical" IS NULL) AS missing_canonical FROM "UsageEvent";`
+    * `SELECT COUNT(*) FILTER (WHERE "modelRaw" IS NULL) AS missing_raw FROM "UsageEvent";`
+  * 回填后重复统计
+    **Expected**：
+  * missing_raw 约等于 0（允许极少异常但需记录 rawKey）
+  * missing_canonical 约等于 0
+  * effort 仅出现 `low|medium|high|xhigh|null`
+
+### V4) 重建 UsageDaily 对账（按天对齐 UsageEvent）
+
+* [ ] **Files**：`lib/usage-aggregate.ts` + backfill 重建逻辑
+  **Steps**：
+
+  * 随机抽 3 天（含有 codex 与 gateway 数据的天）
+  * 对每一天执行：
+
+    * `SUM(UsageDaily.costUsd/totalTokens/requestCount)`
+    * 对比 `UsageEvent` 同日聚合 `SUM(...)`
+      **Expected**：
+  * 每天三项 SUM 完全一致（允许 decimal rounding 差异需明确规则，但建议一致）
+
+### V5) API 三视图切换总量一致（AC3）
+
+* [ ] **Files**：`app/api/usage/by-model/route.ts`
+  **Steps**：
+
+  * 同一 `from/to/filters` 调三次 API：
+
+    * `groupBy=canonical_effort`
+    * `groupBy=canonical`
+    * `groupBy=raw`
+  * 前端或脚本对每个响应计算 `SUM(costUsd) / SUM(totalTokens) / SUM(requestCount)`
+    **Expected**：
+  * 三者 SUM 完全一致（仅分组粒度不同）
+
+### V6) UI 手动验收（对齐 UI设计.md v4 步骤）
+
+* [ ] **Files**：`components/charts/usage-model-table/*`, `usage-content.tsx`
+  **Steps**：
+
+  1. 准备数据：写入 `gpt-5.2-high`、`gpt-5.2-codex`、`gpt-5.2-max` 使用记录
+  2. 默认视图：看到 `gpt-5.2 / gpt-5.2-codex / gpt-5.2-max`（canonical）
+  3. 展开 `gpt-5.2`：看到 high 子行
+  4. Effort 筛选 high：`gpt-5.2` 数值变化，且无 high 的模型隐藏
+  5. 切 raw：出现 warning banner，列表变 raw 字符串，effort filter disabled
+     **Expected**：与 UI设计.md “验收点 #1-#9”一致
+
+### V7) Dashboard 对齐验证
+
+* [ ] **Files**：`TopModelsCard.tsx` + dashboard 数据生成处
+  **Steps**：
+
+  * 选择与 `/usage` 默认相同的时间窗（例如 last 7 days）
+  * 对比 Dashboard Top5 与 `/usage` canonical Top5（按 costUsd）
+    **Expected**：
+  * 顺序与数值一致（允许显示层格式化差异）
+
+---
+
+## RISKS_AND_ROLLBACK
+
+### 风险 R1：误解析（某些模型名真实以 -high 结尾但不是 effort）
+
+* **Signal**：
+
+  * canonical 模型数量异常下降
+  * 出现大量 `warnings: effort_mismatch` 或 `canonical_empty_fallback`
+* **Impact**：聚合维度错误，报表误导
+* **Mitigation**：
+
+  * normalizeModel 仅剥离严格末尾模式，已经最大限度降低误伤
+  * backfill 脚本输出 warnings 计数与样本 rawKey，便于定位
+  * （可选扩展）增加 env 级别例外列表（OPEN_QUESTIONS）
+* **Rollback**：
+
+  * 回滚代码到旧版（按 model 分组），保留新列不使用
+  * 或将已回填的 `modelCanonical/effort` 置空（脚本支持反向更新），再调整解析策略重跑
+
+### 风险 R2：UsageDaily 重建期间数据短暂不一致（部分天已新口径，部分天仍旧）
+
+* **Signal**：
+
+  * `/usage` 在跨天范围内出现“今天 vs 昨天”统计断层
+* **Impact**：短期数据体验抖动
+* **Mitigation**：
+
+  * 采用“按天 delete+rebuild”，并尽量在低峰期执行
+  * 可在 UI 里临时显示 banner：“历史数据回填中”（可选，不强制）
+* **Rollback**：
+
+  * 停止重建脚本
+  * 恢复使用旧聚合逻辑（代码回滚），但注意不要混用新旧 daily（必要时整体清空 daily 并重新跑旧聚合）
+
+### 风险 R3：UsageDaily upsert 失败（ON CONFLICT 找不到匹配 unique/index）
+
+* **Signal**：
+
+  * 聚合任务报错：`there is no unique or exclusion constraint matching the ON CONFLICT specification`
+* **Impact**：daily 无法生成，历史区间统计退化或不可用
+* **Mitigation**：
+
+  * migration.sql 中明确创建匹配 ON CONFLICT 的 expression unique index（包含 effort）
+  * 在 VERIFICATION_CHECKLIST V2/V4 做强校验
+* **Rollback**：
+
+  * 回滚 migration（或新建修复 migration）恢复旧 index 与旧 SQL
+  * 临时将 API 强制改为全量使用 UsageEvent（成本较高，仅作为应急）
+
+### 风险 R4：canonical 聚合导致定价配置“冲突/缺失”提示变多
+
+* **Signal**：
+
+  * canonical 行 pricingConfigured 变为 false
+  * pricingConflict 为 true（多 raw 定价不一致）
+* **Impact**：UI 出现 badge/提示，用户困惑
+* **Mitigation**：
+
+  * API 返回 `pricingModelIds`，UI tooltip 清晰列出冲突来源
+  * 不改 costUsd 展示，成本总量不受影响
+* **Rollback**：
+
+  * 若提示影响过大，可先隐藏冲突提示，仅保留 costUsd（展示层回滚）
+
+### 风险 R5：单文件超过 600 行导致评审不通过
+
+* **Signal**：`components/charts/usage-model-table.tsx` 继续膨胀
+* **Mitigation**：
+
+  * 强制拆分到 `components/charts/usage-model-table/` 目录（FILE_CHANGES 已给出）
+* **Rollback**：
+
+  * 无需 DB 回滚，纯前端重构即可
+
+---
+
+## OPEN_QUESTIONS
+
+1. **Effort 分布条的度量基准**：按 `totalTokens` 还是 `costUsd` 计算占比？
+
+   * 建议默认 `costUsd` 更贴近“看钱”的场景，但 token 更稳定；需主人定口径（会影响 spark bar 与 tooltip 文案）。
+2. **Effort 列位置**：紧跟 Model 列 vs 靠右/靠近 Cost（disputes #1）
+
+   * v4 倾向紧跟 Model；当前计划按 v3/v4 画法放在最右（可配置）。
+3. **Source 子行默认展开策略**（disputes #2）
+
+   * 建议默认折叠 source（避免表格过长），仅在展开 effort 后再手动展开 source。
+4. **effort=null 文案**（disputes #3）
+
+   * 建议中文 “未标注”，英文 “Unspecified”，并在分布条中以灰色占位。
+5. **/api/models 是否需要后端增强**：
+
+   * 当前计划优先在 `FilterPopover` 客户端通过 aliases 实现 “high 命中 canonical”。
+   * 若后续要显示 “variants count”，可能需要后端返回 canonical->raw 变体统计。
+6. **Dashboard 数据源定位与复用**：
+
+   * 需要在仓库内定位 Dashboard topModels 的聚合实现（搜索 `DashboardOverviewResponse`/`topModels`），决定是直接复用 `/api/usage/by-model?groupBy=canonical` 还是复用同一 SQL helper。
+
+

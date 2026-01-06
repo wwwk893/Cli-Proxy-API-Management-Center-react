@@ -131,6 +131,19 @@ export const usageByModelQuerySchema = z.object({
   channels: channelOrChannelArray,
   sources: stringOrStringArray.default([]),
   groupBySource: z.coerce.boolean().optional().default(false),
+  groupBy: z.enum(["canonical", "canonical_effort", "raw"]).optional().default("canonical"),
+  efforts: z
+    .union([
+      z.enum(["low", "medium", "high", "xhigh", "unspecified"]),
+      z.array(z.enum(["low", "medium", "high", "xhigh", "unspecified"])),
+    ])
+    .optional()
+    .transform((val) => {
+      if (!val) return [] as string[];
+      const arr = Array.isArray(val) ? val : [val];
+      const trimmed = arr.map((v) => v.trim()).filter(Boolean);
+      return Array.from(new Set(trimmed));
+    }),
 });
 
 // Sessions API schemas

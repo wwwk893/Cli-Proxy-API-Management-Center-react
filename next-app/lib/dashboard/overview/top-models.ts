@@ -57,7 +57,7 @@ export async function queryTopModels(
     useDaily
       ? prisma.$queryRaw<Row[]>`
           SELECT
-            "model" AS model,
+            COALESCE("modelCanonical", "model") AS model,
             COALESCE(SUM("totalTokens"), 0) AS "totalTokens",
             COALESCE(SUM("costUsd"), 0) AS "costUsd",
             COALESCE(SUM("totalRequests"), 0) AS "requestCount"
@@ -66,13 +66,13 @@ export async function queryTopModels(
             (${dailyFrom ?? null}::timestamptz IS NULL OR "date" >= ${dailyFrom ?? null}::timestamptz)
             AND (${dailyTo ?? null}::timestamptz IS NULL OR "date" <= ${dailyTo ?? null}::timestamptz)
             ${dailyChannelFilter}
-          GROUP BY "model"
+          GROUP BY COALESCE("modelCanonical", "model")
         `
       : Promise.resolve([] as Row[]),
     includeEvents
       ? prisma.$queryRaw<Row[]>`
           SELECT
-            "model" AS model,
+            COALESCE("modelCanonical", "model") AS model,
             COALESCE(SUM("totalTokens"), 0) AS "totalTokens",
             COALESCE(SUM("costUsd"), 0) AS "costUsd",
             COUNT(*) AS "requestCount"
@@ -81,7 +81,7 @@ export async function queryTopModels(
             (${eventFrom ?? null}::timestamptz IS NULL OR "eventTime" >= ${eventFrom ?? null}::timestamptz)
             AND (${eventTo ?? null}::timestamptz IS NULL OR "eventTime" <= ${eventTo ?? null}::timestamptz)
             ${channelEventFilter}
-          GROUP BY "model"
+          GROUP BY COALESCE("modelCanonical", "model")
         `
       : Promise.resolve([] as Row[]),
   ]);
