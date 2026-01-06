@@ -4,6 +4,15 @@ zen-*-batch-*.zip
 zen-batch-*.zip
 evidence/*.zip
 
+# batch 辅助材料（Mode A 默认不入库；仅保留 plan.pro.md / synthesis.final.md）
+batch-*/deliverables.md
+batch-*/prompt.pro.md
+batch-*/relevant_files.txt
+batch-*/review-package.md
+
+# UI 批次过程产物（最终 UI 方案沉淀到任务根目录 UI设计.md）
+ui/
+
 # macOS
 .DS_Store
 __MACOSX/
