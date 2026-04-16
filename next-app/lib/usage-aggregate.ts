@@ -62,10 +62,22 @@ export async function backfillUsageEventCost(payload: AggregateJobPayload): Prom
 export async function runUsageDailyAggregation(payload: AggregateJobPayload): Promise<AggregateResult> {
   const { rangeFrom, rangeTo, filters } = payload;
   const filterSql = buildUsageEventFilterSql(filters);
+  const dailyFilterSql = buildUsageEventFilterSql(filters, "d");
 
   await backfillUsageEventCost(payload);
 
-  // Single-shot upsert of the whole day; relies on UsageDaily composite unique key
+  // Rebuild affected daily buckets from scratch so reruns can remove stale
+  // aggregates after source events were deleted or re-ingested.
+  await prisma.$executeRaw<number>(
+    Prisma.sql`
+      DELETE FROM "UsageDaily" AS d
+      WHERE
+        d."date" >= date_trunc('day', ${rangeFrom}::timestamptz)
+        AND d."date" <= date_trunc('day', ${rangeTo}::timestamptz)
+        ${dailyFilterSql};
+    `,
+  );
+
   const result = await prisma.$executeRaw<number>(
     Prisma.sql`
     INSERT INTO "UsageDaily" (
@@ -94,27 +106,7 @@ export async function runUsageDailyAggregation(payload: AggregateJobPayload): Pr
     FROM "UsageEvent"
     WHERE "eventTime" >= ${rangeFrom} AND "eventTime" <= ${rangeTo}
     ${filterSql}
-    GROUP BY 2,3,4,5,6,7,8,9,10
-    ON CONFLICT (
-      "date",
-      "apiPath",
-      "model",
-      COALESCE("effort", ''),
-      COALESCE("proxyHost", ''),
-      COALESCE("authSource", ''),
-      COALESCE("authIndex", -1),
-      COALESCE("authFailed", false)
-    )
-    DO UPDATE SET
-      "modelCanonical"  = EXCLUDED."modelCanonical",
-      "effort"          = EXCLUDED."effort",
-      "totalRequests"   = EXCLUDED."totalRequests",
-      "inputTokens"     = EXCLUDED."inputTokens",
-      "outputTokens"    = EXCLUDED."outputTokens",
-      "reasoningTokens" = EXCLUDED."reasoningTokens",
-      "cachedTokens"    = EXCLUDED."cachedTokens",
-      "totalTokens"     = EXCLUDED."totalTokens",
-      "costUsd"         = EXCLUDED."costUsd";
+    GROUP BY 2,3,4,5,6,7,8,9,10;
     `,
   );
 

@@ -71,6 +71,29 @@ type SessionContext = {
   prevTotalUsage: NormalizedTokenUsage | null;
 };
 
+function buildEventDedupKey(params: {
+  sessionId: string | null;
+  eventTime: Date;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+}) {
+  return [
+    "codex",
+    params.sessionId ?? "unknown",
+    params.eventTime.toISOString(),
+    params.model,
+    params.inputTokens,
+    params.outputTokens,
+    params.reasoningTokens,
+    params.cachedTokens,
+    params.totalTokens,
+  ].join(":");
+}
+
 function toNumber(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (typeof value === "string") {
@@ -282,9 +305,11 @@ async function parseRolloutFile(params: {
   deviceId: string;
   pricingMap: Awaited<ReturnType<typeof loadPricingMap>>;
   maxEvents: number;
+  seenEventKeys?: Set<string>;
 }): Promise<UsageEventInput[]> {
   const { filePath, cursor, deviceId, pricingMap, maxEvents } = params;
   const events: UsageEventInput[] = [];
+  const seenEventKeys = params.seenEventKeys ?? new Set<string>();
 
   const ctx: SessionContext = {
     sessionId: null,
@@ -299,6 +324,7 @@ async function parseRolloutFile(params: {
   const stream = fs.createReadStream(filePath, { encoding: "utf8" });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let lineNo = 0;
+  let rootSessionId: string | null = null;
 
   for await (const line of rl) {
     if (events.length >= maxEvents) break;
@@ -318,6 +344,9 @@ async function parseRolloutFile(params: {
 
     if (type === "session_meta") {
       extractSessionMeta(obj, ctx);
+      if (!rootSessionId && ctx.sessionId) {
+        rootSessionId = ctx.sessionId;
+      }
       continue;
     }
 
@@ -343,6 +372,14 @@ async function parseRolloutFile(params: {
     }
     if (!lastUsage) continue;
 
+    // Forked rollout files can replay ancestor session history by emitting an
+    // extra `session_meta` for the source thread before a burst of old
+    // `token_count` entries. Only the first session in the file is treated as
+    // the live session; replayed ancestor sessions are skipped.
+    if (rootSessionId && ctx.sessionId && ctx.sessionId !== rootSessionId) {
+      continue;
+    }
+
     const model = ctx.model ?? getFirstString(obj, ["model", "payload.model", "info.model"]) ?? "unknown";
     const normalized = normalizeModel({ model, effort: ctx.effort });
     const inputTokens = lastUsage.inputTokens;
@@ -360,6 +397,21 @@ async function parseRolloutFile(params: {
       reasoningTokens: 0,
       pricingMap,
     });
+
+    const dedupKey = buildEventDedupKey({
+      sessionId: ctx.sessionId,
+      eventTime,
+      model,
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      cachedTokens,
+      totalTokens,
+    });
+    if (seenEventKeys.has(dedupKey)) {
+      continue;
+    }
+    seenEventKeys.add(dedupKey);
 
     const rawKey = `codex:${deviceId}:${ctx.sessionId ?? "unknown"}:${eventTime.toISOString()}:${lineNo}`;
 
@@ -432,6 +484,7 @@ export async function ingestUsageFromCodex(options: CodexIngestOptions = {}): Pr
   });
 
   const events: UsageEventInput[] = [];
+  const seenEventKeys = new Set<string>();
   let filesParsed = 0;
 
   for (const f of candidateFiles) {
@@ -443,6 +496,7 @@ export async function ingestUsageFromCodex(options: CodexIngestOptions = {}): Pr
       deviceId,
       pricingMap,
       maxEvents: remaining,
+      seenEventKeys,
     });
     filesParsed++;
     events.push(...parsed);
