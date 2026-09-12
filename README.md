@@ -1,107 +1,165 @@
-# Cli-Proxy-API-Management-Center
-This is the modern WebUI for managing the CLI Proxy API.
+# CLI Proxy API Management Center
+
+A single-file Web UI (React + TypeScript) for operating and troubleshooting the **CLI Proxy API** via its **Management API** (config, credentials, and logs).
 
 [中文文档](README_CN.md)
 
-Main Project: https://github.com/router-for-me/CLIProxyAPI  
-Example URL: https://remote.router-for.me/  
-Minimum required version: ≥ 6.3.0 (recommended ≥ 6.5.0)
+**Main Project**: https://github.com/router-for-me/CLIProxyAPI   
+**Minimum Required Version**: ≥ 7.2.147 (recommended latest)
 
-Since 6.0.19 the WebUI ships with the main program; access it via `/management.html` on the API port once the service is running.
+Since version 6.0.19, the Web UI ships with the main program; access it via `/management.html` on the API port once the service is running.
 
-## Features
+## Sponsor
 
-### Capabilities
-- **Login & UX**: Auto-detects the current address (manual override/reset supported), encrypted auto-login, language/theme toggles, responsive layout with mobile sidebar.
-- **Basic Settings**: Debug, proxy URL, request retries, quota fallback (auto-switch project/preview models), usage-statistics toggle, request logging & logging-to-file switches, WebSocket `/ws/*` auth switch.
-- **Keys & Providers**: Manage proxy auth keys, Gemini/Codex/Claude configs, OpenAI-compatible providers (custom base URLs/headers/proxy/model aliases), Vertex AI credential import from service-account JSON with optional location.
-- **Auth Files & OAuth**: Upload/download/search/paginate JSON credentials; type filters (Qwen/Gemini/GeminiCLI/AIStudio/Claude/Codex/Antigravity/iFlow/Vertex/Empty); delete-all; OAuth/Device flows for Codex, Anthropic (Claude), Antigravity (Google), Gemini CLI (optional project), Qwen; iFlow OAuth and cookie login.
-- **Logs**: Live viewer with auto-refresh/incremental updates, download and clear; section appears when logging-to-file is enabled.
-- **Usage Analytics**: Overview cards, hourly/daily toggles, up to three model lines per chart, per-API stats table (Chart.js).
-- **Config Management**: In-browser CodeMirror YAML editor for `/config.yaml` with reload/save, syntax highlighting, and status feedback.
-- **System Info & Versioning**: Connection/config cache status, last refresh time, server version/build date, and UI version in the footer.
-- **Security & Preferences**: Masked secrets, secure local storage, persistent theme/language/sidebar state, real-time status feedback.
+[![https://go.apimart.ai/gh-cli-proxy-api-management-center](./assets/apimart-en.png)](https://go.apimart.ai/gh-cli-proxy-api-management-center)
 
-## How to Use
+Thanks to APIMart for sponsoring this project!
 
-1) **After CLI Proxy API is running (recommended)**  
-   Visit `http://your-server:8317/management.html`.
+APIMart is a low-cost API platform for AI image & video generation — GPT-Image-2 from $0.006/image, 160+ images per dollar. One async API covers both image and video: submit a task, get an ID, fetch results via polling or callback. Batch tens of thousands of images without timeouts, switch models without changing code. Pay-as-you-go with no monthly fee — [sign up here](https://go.apimart.ai/gh-cli-proxy-api-management-center) to get started.
 
-2) **Direct static use**  
-   Open `index.html` (or the bundled `dist/index.html` from `npm run build`) directly in your browser.
+## What this is (and isn’t)
 
-3) **Local server**
+- This repository is the Web UI only. It talks to the CLI Proxy API **Management API** (`/v0/management`) to read/update config, upload credentials, and view logs.
+- It is **not** a proxy and does not forward traffic.
+
+## Quick start
+
+### Option A: Use the Web UI bundled in CLI Proxy API (recommended)
+
+1. Start your CLI Proxy API service.
+2. Open: `http://<host>:<api_port>/management.html`
+3. Enter your **management key** and connect.
+
+The address is auto-detected from the current page URL; manual override is supported.
+
+### Option B: Run the dev server
+
 ```bash
-npm install
-npm start        # http://localhost:3000
-npm run dev      # optional dev port: 3090
-# or
-python -m http.server 8000
+bun install --frozen-lockfile
+bun run dev
 ```
-   Then open the corresponding localhost URL.
 
-4) **Configure connection**  
-   The login page shows the detected address; you can override it, enter the management key, and click Connect. Saved credentials use encrypted local storage for auto-login.
+Open `http://localhost:5173`, then connect to your CLI Proxy API backend instance.
 
-Tip: The Logs navigation item appears after enabling "Logging to file" in Basic Settings.
+### Option C: Build a single HTML file
+
+```bash
+bun install --frozen-lockfile
+bun run build
+```
+
+- Output: `dist/index.html` (all assets are inlined).
+- For CLI Proxy API bundling, the release workflow renames it to `management.html`.
+- To preview locally: `bun run preview`
+
+Tip: opening `dist/index.html` via `file://` may be blocked by browser CORS; serving it (preview/static server) is more reliable.
+
+## Connecting to the server
+
+### API address
+
+You can enter any of the following; the UI will normalize it:
+
+- `localhost:8317`
+- `http://192.168.1.10:8317`
+- `https://example.com:8317`
+- `http://example.com:8317/v0/management` (also accepted; the suffix is removed internally)
+
+### Management key (not the same as API keys)
+
+The management key is sent with every request as:
+
+- `Authorization: Bearer <MANAGEMENT_KEY>` (default)
+
+This is different from the proxy `api-keys` you manage inside the UI (those are for client requests to the proxy endpoints).
+
+### Remote management
+
+If you connect from a non-localhost browser, the server must allow remote management (e.g. `allow-remote-management: true`).  
+Check the CLI Proxy API server documentation/config comments for the full authentication rules, server-side limits, and edge cases.
+
+## What you can manage (mapped to the UI pages)
+
+- **Dashboard**: connection status, server version/build date, quick counts, model availability snapshot.
+- **Config Panel**: visual editor for common `config.yaml` fields, basic settings, proxy `api-keys`, and source editing with YAML highlighting/search plus a save diff preview.
+- **AI Providers**:
+  - Gemini/Codex/Claude/Vertex key entries (base URL, headers, proxy, model aliases, excluded models, prefix).
+  - OpenAI-compatible providers (multiple API keys, custom headers, model alias import via `/v1/models`, optional browser-side "chat/completions" test).
+- **Auth Files**: upload/download/delete JSON credentials, filter/search/pagination, runtime-only indicators, view supported models per credential (when the server supports it), manage OAuth excluded models (supports `*` wildcards), configure OAuth model alias mappings.
+- **OAuth**: start OAuth/device flows for Codex, Anthropic/Claude, Antigravity, Kimi, and xAI/Grok; poll status; submit callback URLs or xAI/Grok displayed codes; import Vertex JSON credentials and iFlow cookies.
+- **Quota Management**: manage quota limits and usage for Claude, Antigravity, Codex, Kimi, xAI/Grok, and other providers.
+- **Logs**: tail logs with incremental polling, auto-refresh, search, hide management traffic, clear logs; download request error log files.
+- **System**: quick links, update check, request logging toggle, local login data cleanup, and fetch `/v1/models` (grouped view). Requires at least one proxy API key to query models.
 
 ## Tech Stack
 
-- **Frontend**: Plain HTML, CSS, JavaScript (ES6+)
-- **Styling**: CSS3 + Flexbox/Grid with CSS Variables
-- **Icons**: Font Awesome 6.4.0
-- **Charts**: Chart.js for interactive data visualization
-- **Editor/Parsing**: CodeMirror + js-yaml
-- **Fonts**: Segoe UI system font
-- **Internationalization**: Custom i18n (EN/CN) and theme system (light/dark)
-- **API**: RESTful management endpoints with automatic authentication
-- **Storage**: LocalStorage with lightweight encryption for preferences/credentials
+- React 19 + TypeScript 6.0
+- Vite 8 (single-file build)
+- Zustand (state management)
+- Axios (HTTP client)
+- react-router-dom v7 (HashRouter)
+- Motion (animations)
+- CodeMirror 6 (YAML editor)
+- SCSS Modules (styling)
+- i18next (internationalization)
 
-## Build & Development
+## Internationalization
 
-- `npm run build` bundles everything into `dist/index.html` via webpack (`build.cjs`, `bundle-entry.js`, `build-scripts/prepare-html.js`).
-- External CDNs remain for Font Awesome, Chart.js, and CodeMirror to keep the bundle lean.
-- Development servers: `npm start` (3000) or `npm run dev` (3090); Python `http.server` also works for static hosting.
+Currently supports four languages:
+
+- English (en)
+- Simplified Chinese (zh-CN)
+- Traditional Chinese (zh-TW)
+- Russian (ru)
+
+The UI language is automatically detected from browser settings and can be manually switched from the login page or header language menu.
+
+## Browser Compatibility
+
+- Build target: `ES2020`
+- Supports modern browsers (Chrome, Firefox, Safari, Edge)
+- Responsive layout for mobile and tablet access
+
+## Build & release notes
+
+- Vite produces a **single HTML** output (`dist/index.html`) with all assets inlined (via `vite-plugin-singlefile`).
+- Tagging `vX.Y.Z` triggers `.github/workflows/release.yml` to publish `dist/management.html`.
+- The UI version shown on the System page is injected at build time (env `VERSION`, git tag, or `package.json` fallback).
+
+## Security notes
+
+- The management key is stored in browser `localStorage` using a lightweight obfuscation format (`enc::v1::...`) to avoid plaintext storage; treat it as sensitive.
+- Use a dedicated browser profile/device for management. Be cautious when enabling remote management and evaluate its exposure surface.
 
 ## Troubleshooting
 
-### Connection Issues
-1. Confirm that the CLI Proxy API service is running.
-2. Check if the API address is correct.
-3. Verify that the management key is valid.
-4. Ensure your firewall settings allow the connection.
+- **Can’t connect / 401**: confirm the API address and management key; remote access may require enabling remote management in the server config.
+- **Repeated auth failures**: the server may temporarily block remote IPs.
+- **Logs page missing**: enable “Logging to file” in Basic Settings; the navigation item is shown only when file logging is enabled.
+- **Some features show “unsupported”**: the backend may be too old or the endpoint is disabled/absent (common for model lists per auth file, excluded models, logs).
+- **OpenAI provider test fails**: the test runs in the browser and depends on network/CORS of the provider endpoint; a failure here does not always mean the server cannot reach it.
 
-### Data Not Updating
-1. Click the "Refresh All" button.
-2. Check your network connection.
-3. Check the browser's console for any error messages.
+## Development
 
-### Logs & Config Editor
-- Logs: Requires server-side logging-to-file; 404 indicates the server build is too old or logging is disabled.
-- Config editor: Requires `/config.yaml` endpoint; keep YAML valid before saving.
-
-### Usage Stats
-- Enable "Usage statistics" if charts stay empty; data resets on server restart.
-
-## Project Structure
-```
-├── index.html
-├── styles.css
-├── app.js
-├── i18n.js
-├── src/                # Core/modules/utils source code
-├── build.cjs           # Webpack build script
-├── bundle-entry.js     # Bundling entry
-├── build-scripts/      # Build utilities
-│   └── prepare-html.js
-├── dist/               # Bundled single-file output
-├── BUILD_RELEASE.md
-├── LICENSE
-├── README.md
-└── README_CN.md
+```bash
+bun run dev        # Vite dev server
+bun run build      # tsc + Vite build
+bun run preview    # serve dist locally
+bun run test       # Bun test suite
+bun run lint       # ESLint (fails on warnings)
+bun run verify     # test + lint + build
+bun run format     # Prettier
+bun run type-check # tsc --noEmit
 ```
 
 ## Contributing
-We welcome Issues and Pull Requests to improve this project! We encourage more developers to contribute to the enhancement of this WebUI!
 
-This project is licensed under the MIT License.
+Issues and PRs are welcome. Please include:
+
+- Reproduction steps (server version + UI version)
+- Screenshots for UI changes
+- Verification notes (`bun run verify`, plus `bun run type-check` when run separately)
+
+## License
+
+MIT
